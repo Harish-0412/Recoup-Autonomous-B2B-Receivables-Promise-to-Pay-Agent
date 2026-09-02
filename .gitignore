@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Local environment
+.env
+
+# ML artifacts: keep the directory, never commit trained binaries.
+src/ml/artifacts_store/*
+!src/ml/artifacts_store/.gitkeep
