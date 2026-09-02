@@ -13,3 +13,6 @@ venv/
 # ML artifacts: keep the directory, never commit trained binaries.
 src/ml/artifacts_store/*
 !src/ml/artifacts_store/.gitkeep
+
+# Generated synthetic datasets: reproducible from a seed, never committed.
+data/synthetic/
