@@ -1,0 +1,1 @@
+"""Recoup application package."""
