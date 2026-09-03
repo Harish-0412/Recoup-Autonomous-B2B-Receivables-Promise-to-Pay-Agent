@@ -2,7 +2,7 @@
 
 Import from here rather than from ``app.models.tables`` so call sites stay
 stable if a table moves. Importing this package also registers every model on
-``Base.metadata``, which is what makes ``init_db`` and Alembic autogenerate see
+``Base.metadata``, which is what makes Alembic's autogenerate see
 them -- ``app.db.session`` deliberately does not import models itself, to avoid
 a circular import.
 """

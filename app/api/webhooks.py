@@ -99,7 +99,11 @@ async def razorpay_webhook(
     event_type = str(payload.get("event", "unknown"))
 
     if await repository.webhook_already_processed(db, event_id):
-        logger.info("Duplicate webhook ignored", event_id=event_id, event=event_type)
+        # `event_type=`, never `event=`: structlog uses `event` for the message
+        # itself, so passing it as a field raises TypeError -- which turned
+        # every duplicate delivery, the case this branch exists to handle
+        # gracefully, into a 500 and a Razorpay retry.
+        logger.info("Duplicate webhook ignored", event_id=event_id, event_type=event_type)
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={"status": "duplicate", "event_id": event_id},

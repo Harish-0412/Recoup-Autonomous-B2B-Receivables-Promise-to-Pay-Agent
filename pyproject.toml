@@ -4,34 +4,87 @@ version = "0.1.0"
 description = "Autonomous B2B Receivables & Promise-to-Pay Agent"
 readme = "README.md"
 requires-python = ">=3.11"
+
+# This file is the single source of truth for dependencies. There is no
+# requirements.txt: two lists that must agree is one list that eventually
+# does not, which is exactly the drift that made a clean clone uninstallable.
+#
+# Floors, not exact pins. Several of the previous exact pins were pinning
+# *broken* versions (see the notes below), and a floor that encodes the known
+# bad boundary survives a routine upgrade in a way a pin does not. Reproducible
+# builds come from a lockfile generated on top of this, not from these ranges.
 dependencies = [
-    "fastapi==0.115.0",
-    "uvicorn[standard]==0.32.0",
-    "sqlalchemy==2.0.36",
-    "alembic==1.14.1",
-    "asyncpg==0.29.0",
-    "pydantic==2.10.3",
-    "pydantic-settings==2.6.1",
-    "python-dotenv==1.0.1",
-    "httpx==0.28.1",
-    "razorpay==1.4.1",
-    "resend==2.42.0",
-    "groq==0.6.0",
-    "google-generativeai==0.8.3",
-    "python-multipart==0.0.12",
-    "email-validator==2.2.0",
-    "python-json-logger==2.0.7",
-    "structlog==24.4.0",
+    # --- web ---
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "python-multipart>=0.0.12",
+    "email-validator>=2.2",
+
+    # --- data ---
+    # psycopg, not asyncpg: app.core.config normalises every URL to
+    # postgresql+psycopg, so asyncpg was never the driver actually loaded --
+    # importing app.models on a clean install raised ModuleNotFoundError.
+    "sqlalchemy>=2.0.36",
+    "psycopg[binary]>=3.2",
+    # SQLAlchemy's asyncio bridge needs greenlet at runtime. It arrives
+    # transitively today; naming it means an upgrade cannot quietly drop it.
+    "greenlet>=3.0",
+    "alembic>=1.14",
+
+    # --- config ---
+    "pydantic>=2.10",
+    "pydantic-settings>=2.6",
+    "python-dotenv>=1.0",
+
+    # --- agent loop ---
+    # instructor:     validated, retry-on-failure structured LLM output.
+    # transitions:    escalation-ladder FSM; the library enforces the guards.
+    # business-rules: policy rules as data rather than nested ifs.
+    "instructor>=1.16",
+    "transitions>=0.9",
+    "business-rules>=1.1",
+    "dateparser>=1.2",
+
+    # --- integrations ---
+    # razorpay must stay >=2.0: 1.4.x imports pkg_resources, which modern
+    # setuptools no longer provides, so `import razorpay` raises outright.
+    "razorpay>=2.0",
+    # groq must stay >=1.7: 0.6.0 passes `proxies=` to httpx, which httpx>=0.28
+    # removed, so constructing a client raises TypeError.
+    "groq>=1.7",
+    "resend>=2.4",
+    "google-generativeai>=0.8.3",
+    "httpx>=0.28",
+
+    # --- logging ---
+    "structlog>=24.4",
+    "python-json-logger>=2.0",
 ]
 
 [project.optional-dependencies]
+# The trained recovery scorer and reply classifier. Kept out of the base
+# install so the API container does not carry ~500MB of ML wheels it never
+# imports: app.core.agent degrades to the rules-based scorer when these are
+# absent, which is the documented behaviour.
+ml = [
+    "scikit-learn>=1.4",
+    "xgboost>=2.0",
+    "shap>=0.45",
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "joblib>=1.3",
+]
+
+# Depends on the ml extra on purpose: tests/ml/ imports sklearn, xgboost and
+# shap directly, so a dev install that omitted them would collect-error.
 dev = [
-    "pytest==8.3.4",
-    "pytest-asyncio==0.24.0",
-    "pytest-cov==5.0.0",
+    "recoup[ml]",
+    "pytest>=8.2",
+    "pytest-asyncio>=0.24,<0.25",
+    "pytest-cov>=5.0",
     "ruff==0.7.1",
-    "mypy==1.13.0",
-    "types-requests==2.32.3",
+    "mypy>=1.13",
+    "types-requests>=2.32",
 ]
 
 [build-system]

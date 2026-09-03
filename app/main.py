@@ -3,9 +3,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 # Imported for its side effect: this registers every table on
-# Base.metadata, which is what init_db's create_all needs to see.
+# Base.metadata, which is what Alembic's autogenerate compares against.
 # app.db.session deliberately does not import models itself, to avoid a
 # circular import.
 #
@@ -21,7 +22,7 @@ from app.api.reports import router as reports_router
 from app.api.webhooks import router as webhooks_router
 from app.core.config import get_settings
 from app.core.logging import get_logger, setup_logging
-from app.db.session import close_db, init_db
+from app.db.session import close_db, engine
 
 settings = get_settings()
 logger = get_logger(__name__)
@@ -29,10 +30,24 @@ logger = get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Start up, and verify the database is actually reachable and migrated.
+
+    Note what this does *not* do: create tables. Schema is Alembic's job, run
+    as a release step before this process starts serving. Booting an app that
+    silently creates whatever tables it happens to want is how a production
+    database ends up with no migration history.
+
+    The connectivity check is here so a bad DATABASE_URL fails at startup --
+    visible as a failed release -- rather than as a 500 on the first request.
+    """
+
     setup_logging()
-    logger.info("Starting application", env=settings.APP_ENV)
-    await init_db()
-    logger.info("Database initialized")
+    logger.info("Starting application", env=settings.APP_ENV, debug=settings.DEBUG)
+
+    async with engine.connect() as connection:
+        await connection.execute(text("SELECT 1"))
+    logger.info("Database reachable", pool_mode=settings.DB_POOL_MODE)
+
     yield
     await close_db()
     logger.info("Application shutdown complete")
@@ -47,10 +62,15 @@ app = FastAPI(
     redoc_url="/redoc" if settings.DEBUG else None,
 )
 
+# CORS_ORIGINS is the only way to widen this. The previous form used "*" under
+# DEBUG, which browsers reject outright when paired with allow_credentials --
+# so the permissive branch did not even work, it just failed confusingly.
+# Credentials are allowed only when specific origins are named, which is the
+# combination the spec actually permits.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if settings.DEBUG else [],
-    allow_credentials=True,
+    allow_origins=settings.cors_origins,
+    allow_credentials=bool(settings.cors_origins),
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -67,5 +87,7 @@ async def root() -> dict:
     return {
         "service": settings.APP_NAME,
         "version": "0.1.0",
-        "docs": "/docs" if settings.DEBUG else "disabled in production",
+        # Reports what is actually true, not what the environment is called:
+        # docs follow DEBUG, and DEBUG is off by default in every environment.
+        "docs": "/docs" if settings.DEBUG else "disabled (set DEBUG=true to enable)",
     }

@@ -16,6 +16,7 @@ from datetime import date, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.audit import DecisionLedger
 from app.core.domain import CaseSnapshot, snapshot_from_rows
@@ -40,7 +41,21 @@ async def get_customer(session: AsyncSession, customer_id: str) -> Customer | No
 
 
 async def get_invoice(session: AsyncSession, invoice_id: str) -> Invoice | None:
-    result = await session.execute(select(Invoice).where(Invoice.invoice_id == invoice_id))
+    """One invoice, with its promises already loaded.
+
+    The eager load is not an optimisation, it is a correctness requirement.
+    Under asyncio a lazy relationship access raises ``MissingGreenlet`` rather
+    than quietly emitting a second query, so touching ``invoice.promises`` on a
+    plainly-selected row is a 500 -- which is exactly what
+    ``GET /invoices/{id}`` used to return. Loading it here means every caller
+    gets a row that is safe to read attributes from.
+    """
+
+    result = await session.execute(
+        select(Invoice)
+        .where(Invoice.invoice_id == invoice_id)
+        .options(selectinload(Invoice.promises))
+    )
     return result.scalar_one_or_none()
 
 

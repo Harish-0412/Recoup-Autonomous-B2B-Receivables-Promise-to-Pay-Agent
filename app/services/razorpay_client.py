@@ -61,12 +61,32 @@ class RazorpayClient:
     def verify_webhook_signature(
         self, payload: bytes, signature: str, secret: str | None = None
     ) -> bool:
+        """Whether ``payload`` really came from Razorpay.
+
+        Called through ``self.client.utility``, the *instance* the SDK builds
+        for this client. ``verify_webhook_signature`` is an instance method:
+        calling it on the ``razorpay.Utility`` class bound the payload to
+        ``self`` and raised ``TypeError`` for a missing ``secret``, so this
+        never returned a verdict at all -- every webhook 500'd. It failed
+        closed, which is the right direction to fail, but it meant no webhook
+        was ever processed.
+
+        Every failure is caught and reported as False. A signature check that
+        raises is a signature check that did not pass, and the caller must be
+        able to treat it as a plain rejection rather than a crash.
+        """
+
         secret = secret or settings.RAZORPAY_WEBHOOK_SECRET
         try:
-            razorpay.Utility.verify_webhook_signature(payload.decode("utf-8"), signature, secret)
+            self.client.utility.verify_webhook_signature(payload.decode("utf-8"), signature, secret)
             return True
         except razorpay.errors.SignatureVerificationError:
             logger.warning("Webhook signature verification failed")
+            return False
+        except Exception as exc:
+            # A malformed signature header, undecodable body or missing secret
+            # all land here. None of them are "verified".
+            logger.warning("Webhook signature could not be checked", error=str(exc))
             return False
 
 

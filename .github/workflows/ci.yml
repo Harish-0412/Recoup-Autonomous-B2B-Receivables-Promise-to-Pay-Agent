@@ -56,6 +56,29 @@ jobs:
   test:
     name: Tests (pytest)
     runs-on: ubuntu-latest
+
+    # A real Postgres, not SQLite: the schema uses Postgres enums and JSONB,
+    # and the migration is only meaningfully tested against the engine it will
+    # actually run on.
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: recoup
+          POSTGRES_PASSWORD: recoup
+          POSTGRES_DB: recoup
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://recoup:recoup@localhost:5432/recoup
+      APP_ENV: development
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -69,6 +92,15 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
+
+      # Proves the release command works, and that the baseline reverses --
+      # a migration that cannot be rolled back is a migration you cannot deploy
+      # with confidence.
+      - name: Verify migrations round-trip
+        run: |
+          alembic upgrade head
+          alembic downgrade base
+          alembic upgrade head
 
       - name: Run tests
         run: pytest --cov=app --cov=src --cov-report=term-missing --cov-report=xml

@@ -259,8 +259,7 @@ explains each caveat in full:**
 │   ├── architecture.md              # expanded architecture + roadmap
 │   └── evaluation_report.md         # generated output of the last batch run
 ├── .env.example
-├── pyproject.toml
-├── requirements.txt
+├── pyproject.toml               # the single dependency source of truth
 └── README.md
 ```
 
@@ -277,24 +276,45 @@ explains each caveat in full:**
 ### Setup
 
 ```bash
-git clone https://github.com/<your-username>/recoup.git
-cd recoup
+git clone https://github.com/Harish-0412/Recoup-Autonomous-B2B-Receivables-Promise-to-Pay-Agent.git
+cd Recoup-Autonomous-B2B-Receivables-Promise-to-Pay-Agent
 
-python -m venv .venv
+python3.11 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+pip install -e ".[dev]"          # dependencies live in pyproject.toml only
 
 cp .env.example .env             # fill in the values below
+```
+
+`pip install -e "."` gets the API alone. The `[ml]` extra adds the trained
+scorer's stack (scikit-learn, XGBoost, SHAP); `[dev]` includes it plus the test
+tools, because the ML tests import those directly.
+
+### Create the schema
+
+Alembic owns the schema — the app never creates tables at startup, so this step
+is not optional. It is also the release command for a deploy:
+
+```bash
+alembic upgrade head
+```
+
+### Load demo data
+
+```bash
+python scripts/seed_demo.py --batch-size 120 --seed 42
 ```
 
 ### Run
 
 ```bash
-uvicorn src.main:app --reload
+uvicorn app.main:app --reload
 ```
 
-- API docs: `http://localhost:8000/docs`
 - Health check: `http://localhost:8000/api/v1/health`
+- API docs: `http://localhost:8000/docs` — only when `DEBUG=true`, which
+  `.env.example` sets for local work. It is off by default everywhere else, so
+  an unconfigured deploy does not publish them.
 
 ## Environment Variables
 
