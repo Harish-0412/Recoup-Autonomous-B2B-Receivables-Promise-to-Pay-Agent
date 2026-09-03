@@ -33,7 +33,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.logging import get_logger
+from app.core.logging import bind_logger, get_logger
 from app.models.enums import DeliveryStatus
 from app.models.tables import Invoice
 from app.services import repository
@@ -156,7 +156,8 @@ class ExecutionService:
     ) -> ExecutionResult:
         """Deliver one approved action. Never raises on a provider failure."""
 
-        log = logger.bind(
+        log = bind_logger(
+            logger,
             invoice_id=intent.invoice_id,
             ladder_step=intent.ladder_step,
             dry_run=self.gateways.dry_run,

@@ -81,12 +81,25 @@ class ScoringConfig(BaseModel):
     #: value: the customer is about to pay, and contacting them is a false
     #: intervention rather than a win.
     #:
-    #: 0.75 is a business setting, not a fitted one, and it is the lever that
-    #: trades false interventions against missed recoveries. It is set here so
-    #: that the README's INV-1044 (97% on-time, two days overdue) is left alone,
-    #: which is the behaviour that walkthrough describes. Raise it to chase more
-    #: aggressively; the batch report counts the false interventions either way.
-    self_cure_probability: float = Field(default=0.75, ge=0.0, le=1.0)
+    #: 0.95, swept rather than chosen -- see ``scripts/tune_self_cure_threshold.py``.
+    #: The previous 0.75 was set against the rules-based scorer, whose expected
+    #: calibration error is 0.167, so "0.75" did not correspond to a 75% chance
+    #: of anything. Against the calibrated model (ECE 0.031) the same number
+    #: leaves far more invoices unchased than it appears to.
+    #:
+    #: Over five books of 600 invoices, moving 0.75 -> 0.95 cuts missed
+    #: recoveries from 172 to 35 and drops the at-risk money the agent declines
+    #: to chase from Rs 251.9L to Rs 6.1L, for Rs 2.5L of extra contact cost.
+    #: A contact has to convert only ~0.5% of non-payers to pay for itself at
+    #: that ratio, and the sweep picks 0.95 at every assumed conversion rate
+    #: from 2% to 50% -- so the choice does not rest on the one number the
+    #: simulation cannot supply.
+    #:
+    #: The cost is real and is reported: about 64% of contacts go to customers
+    #: who would have paid anyway. What bounds contact *volume* is the policy
+    #: engine's frequency and daily caps, not this threshold; this decides only
+    #: who is a candidate at all.
+    self_cure_probability: float = Field(default=0.95, ge=0.0, le=1.0)
 
 
 class InvoiceScore(BaseModel):

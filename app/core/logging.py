@@ -1,6 +1,6 @@
 import logging
 import sys
-from typing import cast
+from typing import Any, cast
 
 import structlog
 
@@ -40,3 +40,15 @@ def setup_logging() -> None:
 
 def get_logger(name: str) -> structlog.BoundLogger:
     return cast(structlog.BoundLogger, structlog.get_logger(name))
+
+
+def bind_logger(logger: structlog.BoundLogger, **context: Any) -> structlog.BoundLogger:
+    """``logger.bind()``, typed as what it actually returns.
+
+    structlog types ``bind`` as returning ``BoundLoggerBase``, which has no
+    ``info``/``warning`` -- so every call site would otherwise have to cast, or
+    the whole module would have to give up on type checking. One cast here,
+    matching ``get_logger`` above.
+    """
+
+    return cast(structlog.BoundLogger, logger.bind(**context))

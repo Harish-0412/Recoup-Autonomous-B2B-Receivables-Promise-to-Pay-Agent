@@ -124,6 +124,51 @@ Sparse bins (n < 15) sit at the extremes and their gaps are noise, not
 miscalibration. This matters more than AUC here: a well-ranked but badly scaled
 probability would still multiply into the wrong rupee figure.
 
+### What calibration changed downstream: the self-cure threshold
+
+`ScoringConfig.self_cure_probability` decides when an invoice is left alone
+because it looks like it will be paid without chasing. It was **0.75**, set
+against the rules-based scorer — whose ECE is 0.167, so "0.75" did not
+correspond to a 75% chance of anything. Fixing the calibration made the number
+mean something, and therefore worth re-deriving:
+
+```bash
+python scripts/tune_self_cure_threshold.py --use-model
+```
+
+Pooled over five books of 600 invoices (3,000 decisions per threshold):
+
+| threshold | left alone | missed recoveries | at-risk left unchased | WAIT precision | contacts wasted |
+|---|---|---|---|---|---|
+| 0.60 | 1775 | 345 | — | 0.806 | 44.4% |
+| 0.75 *(old)* | 1238 | 172 | ₹251.9L | 0.861 | 51.5% |
+| 0.85 | 1028 | 128 | — | 0.875 | 54.5% |
+| **0.95 (chosen)** | 223 | **35** | **₹6.1L** | 0.843 | 64.3% |
+
+Moving 0.75 → 0.95 costs **₹2.5L** in extra contacts and puts **₹245.8L** of
+at-risk money in front of the agent. A reminder has to convert only about
+**0.5%** of non-payers to pay for itself at that ratio — the per-step break-even
+across the whole grid runs 0.37%–3.23%.
+
+**The choice does not rest on the number the simulation cannot supply.** The
+generator samples outcomes independently of what the agent does, so no causal
+uplift is measurable here and none is claimed. Instead the sweep treats uplift
+as an input and reports the answer across a range of it: 0.95 wins at **every**
+assumed conversion rate from 2% to 50%. That insensitivity is the reason to
+trust it.
+
+The cost is stated rather than buried: at 0.95 roughly **64% of contacts go to
+customers who would have paid anyway**, up from 51%. What bounds contact
+*volume* is the policy engine's frequency and daily caps, not this threshold —
+this decides only who is a candidate at all. End to end over four cycles,
+missed recoveries fall from 32 to 4 and false interventions rise from 187 to
+315, with compliance violations still at zero.
+
+One documented behaviour changed: the README's INV-1044 (97% on-time, two days
+overdue, ₹75,000) used to be left alone and now gets a reminder. 16% of ₹75,000
+is ₹12,300 at risk against a ₹250 contact. The walkthrough was updated to match
+the evidence rather than the threshold tuned to preserve the walkthrough.
+
 ## Explainability
 
 Global SHAP importance on the test split, top 10:

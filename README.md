@@ -126,7 +126,7 @@ INV-1043   Rs 2,00,000  12 days overdue  Customer: high-value, new risk signals
 INV-1044   Rs 75,000    2 days overdue   Customer: strong payment history
 ```
 
-- **INV-1044** scores below the intervention threshold → left alone. Contacting a customer who's about to pay anyway is a false intervention, and the batch report tracks those as a cost, not a win.
+- **INV-1044** scores P(recovery)=0.84 → a single reminder. This one used to be left alone, and the threshold sweep changed its mind: 16% of ₹75,000 is ₹12,300 at risk, and a ₹250 contact protecting that only has to convert 2% of non-payers to pay for itself. Contacting a customer who was going to pay anyway is still a real cost, and the batch report still counts it — it is just smaller than the risk it buys down. See [`scripts/tune_self_cure_threshold.py`](scripts/tune_self_cure_threshold.py).
 - **INV-1042** scores as low-urgency → a single friendly reminder, no discount offered.
 - **INV-1043** scores as high expected-value-at-risk → escalated to the account's finance contact, with a bounded offer ("pay ₹1,80,000 by Friday, ₹20,000 late fee waived") — where ₹20,000 is a ceiling *the business owner configured*, not a number the LLM invented.
 

@@ -207,3 +207,41 @@ class TestRanking:
         assert [s.invoice_id for s in rank_cases(cases)] == [
             s.invoice_id for s in rank_cases(cases)
         ]
+
+
+def test_self_cure_threshold_is_the_swept_value():
+    """0.95, derived in scripts/tune_self_cure_threshold.py, not hand-set.
+
+    Pinned because the previous 0.75 was tuned against the rules-based scorer's
+    miscalibrated probabilities (ECE 0.167). If this needs to change, re-run
+    the sweep rather than nudging the number.
+    """
+
+    assert ScoringConfig().self_cure_probability == 0.95
+
+
+def test_a_likely_payer_with_real_value_at_risk_is_still_contacted():
+    """The case the sweep changed its mind about.
+
+    A customer with a strong record and a small overdue invoice used to be left
+    alone at 0.75. At 0.95 the arithmetic wins: a ~16% chance of not being paid
+    on Rs 75,000 is over Rs 12,000 at risk, against a Rs 250 contact.
+    """
+
+    case = make_case(
+        invoice_id="INV-1044",
+        amount=75_000.0,
+        days_overdue=2,
+        on_time_ratio=0.97,
+        avg_days_late=1.0,
+        invoice_count=40,
+    )
+
+    score = score_case(case)
+    assert score.p_recovery > 0.75, "still reads as a likely payer"
+    assert score.tier is InterventionTier.REMIND
+
+    # And the old setting would have stayed silent on exactly this invoice.
+    assert score_case(case, ScoringConfig(self_cure_probability=0.75)).tier is (
+        InterventionTier.WAIT
+    )
