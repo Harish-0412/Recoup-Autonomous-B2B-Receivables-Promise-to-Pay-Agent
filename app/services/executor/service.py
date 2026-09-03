@@ -29,6 +29,8 @@ executor reuses the invoice's existing link while it is still payable.
 
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -53,7 +55,7 @@ _PAYABLE_LINK_STATES = frozenset({"created", "partially_paid"})
 class ExecutionService:
     """Delivers approved actions. One instance per batch, not per invoice."""
 
-    def __init__(self, gateways: Gateways, *, settings=None) -> None:
+    def __init__(self, gateways: Gateways, *, settings: Any | None = None) -> None:
         self.gateways = gateways
         if settings is None:
             from app.core.config import get_settings
@@ -233,7 +235,7 @@ class ExecutionService:
         return result
 
 
-def build_execution_service(settings=None) -> ExecutionService:
+def build_execution_service(settings: Any | None = None) -> ExecutionService:
     """The executor the app uses, wired from configuration."""
 
     if settings is None:

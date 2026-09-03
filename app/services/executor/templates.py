@@ -33,7 +33,7 @@ def format_inr(amount: float) -> str:
     text = str(abs(whole))
     if len(text) > 3:
         head, tail = text[:-3], text[-3:]
-        parts = []
+        parts: list[str] = []
         while len(head) > 2:
             parts.insert(0, head[-2:])
             head = head[:-2]

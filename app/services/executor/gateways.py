@@ -23,6 +23,7 @@ not a monkeypatch, and the service cannot tell the difference.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
@@ -87,7 +88,13 @@ class EmailGateway(Protocol):
     ) -> GatewayOutcome: ...
 
 
-async def _call(label: str, fn, *args, timeout: float = DEFAULT_TIMEOUT_SECONDS, **kwargs):
+async def _call(
+    label: str,
+    fn: Callable[..., Any],
+    *args: Any,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    **kwargs: Any,
+) -> GatewayOutcome:
     """Run a blocking provider call in a worker thread, with a deadline.
 
     ``functools.partial`` rather than ``run_sync(fn, *args)`` because
@@ -113,11 +120,11 @@ async def _call(label: str, fn, *args, timeout: float = DEFAULT_TIMEOUT_SECONDS,
 class RazorpayGateway:
     """Live Razorpay payment links."""
 
-    def __init__(self, client=None) -> None:
+    def __init__(self, client: Any | None = None) -> None:
         self._client = client
 
     @property
-    def client(self):
+    def client(self) -> Any:
         # Built lazily so importing this module does not require credentials --
         # which matters because the dry-run path imports it too.
         if self._client is None:
@@ -160,11 +167,11 @@ class RazorpayGateway:
 class ResendGateway:
     """Live Resend email delivery."""
 
-    def __init__(self, client=None) -> None:
+    def __init__(self, client: Any | None = None) -> None:
         self._client = client
 
     @property
-    def client(self):
+    def client(self) -> Any:
         if self._client is None:
             from app.services.resend_client import get_resend_client
 
@@ -254,7 +261,7 @@ class Gateways:
     dry_run: bool
 
     @classmethod
-    def for_settings(cls, settings) -> Gateways:
+    def for_settings(cls, settings: Any) -> Gateways:
         """Live gateways, or dry-run ones when ``DRY_RUN`` is set.
 
         Chosen once here rather than branched on at each call site, so there is
