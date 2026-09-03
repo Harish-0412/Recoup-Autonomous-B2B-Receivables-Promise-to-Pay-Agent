@@ -49,9 +49,7 @@ class StubLLM:
         self.delay = delay
         self.calls: list[str] = []
 
-    async def generate_structured(
-        self, prompt, schema, system_prompt=None, retry_prompt=None
-    ):
+    async def generate_structured(self, prompt, schema, system_prompt=None, retry_prompt=None):
         self.calls.append(prompt)
         if self.delay:
             await asyncio.sleep(self.delay)
@@ -350,9 +348,7 @@ def test_generate_structured_retries_once_then_succeeds():
 
 def test_generate_structured_raises_after_the_retry():
     module = _client_class()
-    scripted = type("C", (_ScriptedClient, module.LLMClient), {})(
-        ["not json", "still not json"]
-    )
+    scripted = type("C", (_ScriptedClient, module.LLMClient), {})(["not json", "still not json"])
 
     with pytest.raises(module.StructuredOutputError):
         run(scripted.generate_structured("p", ReplyIntentLLMOutput))
@@ -778,9 +774,7 @@ def test_no_seed_example_ever_raises(seed_examples):
     for example in seed_examples:
         stub = StubLLM(error=RuntimeError("provider exploded"))
         prediction = run(
-            understand_reply(
-                example.text, example.invoice_id, example.reply_id, client=stub
-            )
+            understand_reply(example.text, example.invoice_id, example.reply_id, client=stub)
         )
 
         assert prediction.fallback_used is True

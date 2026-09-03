@@ -15,11 +15,11 @@ extractor:
    is binding regardless of what the classifier said or how confident it was.
 """
 
-from datetime import datetime
-from typing import Any, Awaitable, Callable
-
 import asyncio
 import re
+from collections.abc import Awaitable, Callable
+from datetime import datetime
+from typing import Any
 
 from src.ml.config import MLSettings
 from src.ml.reply.entity_extraction import (

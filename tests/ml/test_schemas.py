@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pytest
 from pydantic import ValidationError
@@ -101,7 +101,7 @@ def test_scored_at_defaults_to_now_and_is_timezone_aware():
 def test_naive_scored_at_is_treated_as_utc():
     prediction = _reply_prediction(scored_at=datetime(2026, 9, 5, 9, 42, 11))
 
-    assert prediction.scored_at.tzinfo == timezone.utc
+    assert prediction.scored_at.tzinfo == UTC
 
 
 # --- fallback contract ------------------------------------------------------

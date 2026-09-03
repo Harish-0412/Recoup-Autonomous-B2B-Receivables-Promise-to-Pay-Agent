@@ -6,12 +6,12 @@ training pipeline both read from it, so the two can never silently drift apart.
 """
 
 from src.data.synthetic_generator import (
-    CustomerArchetype,
     GENERATOR_VERSION,
+    Customer,
+    CustomerArchetype,
     Invoice,
     ReplySeedExample,
     SyntheticBatch,
-    Customer,
     generate_batch,
     generate_customers,
     generate_invoices,

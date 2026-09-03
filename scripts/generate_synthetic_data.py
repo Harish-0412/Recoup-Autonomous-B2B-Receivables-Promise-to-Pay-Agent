@@ -1,6 +1,6 @@
 """Generate and export a reproducible synthetic batch.
 
-    python scripts/generate_synthetic_data.py --batch-size 600 --seed 42 --out data/synthetic/
+python scripts/generate_synthetic_data.py --batch-size 600 --seed 42 --out data/synthetic/
 """
 
 from __future__ import annotations

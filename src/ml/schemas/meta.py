@@ -1,6 +1,6 @@
 """Metadata stored next to every trained ML artifact."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -27,5 +27,5 @@ class ModelMetadata(BaseModel):
     @classmethod
     def _ensure_timezone_aware(cls, value: datetime) -> datetime:
         if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
+            return value.replace(tzinfo=UTC)
         return value

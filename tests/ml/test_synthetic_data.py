@@ -5,9 +5,9 @@ import pytest
 
 from src.data.synthetic_generator import (
     ARCHETYPE_PROFILES,
-    CustomerArchetype,
     HIDDEN_FIELDS,
     REPLY_TEMPLATES,
+    CustomerArchetype,
     _inr_group,
     _render_amount,
     generate_batch,
@@ -19,8 +19,8 @@ from src.data.synthetic_generator import (
 from src.ml.data.export import (
     FORBIDDEN_IN_TRAINING,
     LABEL_COLUMNS,
-    LeakageError,
     TRAINING_FRAME_COLUMNS,
+    LeakageError,
     export_batch,
     to_customers_frame,
     to_labels_frame,
@@ -422,9 +422,7 @@ def test_round_lakh_amounts_render_without_losing_digits():
 def test_simulate_outcomes_rejects_an_unknown_customer():
     rng = make_rng(0)
     customers = generate_customers(5, rng)
-    invoices = generate_invoices(
-        customers, rng, batch_size=5, as_of=date(2026, 9, 1)
-    )
+    invoices = generate_invoices(customers, rng, batch_size=5, as_of=date(2026, 9, 1))
     invoices[0].customer_id = "CUS-9999"
 
     with pytest.raises(KeyError):

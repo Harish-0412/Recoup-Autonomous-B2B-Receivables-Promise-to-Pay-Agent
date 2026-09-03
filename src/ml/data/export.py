@@ -11,18 +11,19 @@ Two rules are enforced here rather than remembered:
    training script, not something that can happen by accident.
 """
 
-from datetime import date, datetime, timezone
+import json
+from collections.abc import Iterable, Sequence
+from datetime import UTC, date, datetime
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any
 
-import json
 import pandas as pd
 
 from src.data.synthetic_generator import (
+    ARCHETYPE_PROFILES,
     GENERATOR_VERSION,
     HIDDEN_FIELDS,
-    ARCHETYPE_PROFILES,
     Customer,
     CustomerArchetype,
     Invoice,
@@ -69,9 +70,13 @@ CUSTOMER_EXPORT_COLUMNS: tuple[str, ...] = (
 ) + _CUSTOMER_ATTRIBUTES
 
 INVOICE_EXPORT_COLUMNS: tuple[str, ...] = (
-    "invoice_id",
-    "customer_id",
-) + _INVOICE_ATTRIBUTES + LABEL_COLUMNS
+    (
+        "invoice_id",
+        "customer_id",
+    )
+    + _INVOICE_ATTRIBUTES
+    + LABEL_COLUMNS
+)
 
 #: One row per invoice, customer history joined on and prefixed ``customer_``
 #: so it lines up with the Phase 5 feature names.
@@ -255,7 +260,7 @@ def export_batch(
         "seed": seed,
         "horizon_days": horizon_days,
         "as_of": (as_of or (invoices[0].flagged_date if invoices else None)),
-        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "row_counts": {
             "customers": len(customers_frame),
             "invoices": len(invoices_frame),

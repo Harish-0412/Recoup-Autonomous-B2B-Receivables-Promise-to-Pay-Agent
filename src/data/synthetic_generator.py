@@ -23,9 +23,10 @@ Design rules that matter downstream:
   accuracy and teaches you nothing.
 """
 
+from collections.abc import Iterable
 from datetime import date, timedelta
 from enum import Enum
-from typing import Any, Iterable
+from typing import Any
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
@@ -57,13 +58,38 @@ CHANNELS: tuple[str, ...] = ("email", "whatsapp")
 PAYMENT_TERMS_DAYS: tuple[int, ...] = (15, 30, 45, 60)
 
 _NAME_PREFIXES: tuple[str, ...] = (
-    "Shree", "Bharat", "Ganesh", "Krishna", "Meenakshi", "Sunrise", "Apex",
-    "Vertex", "Nova", "Deccan", "Konark", "Anand", "Vishwa", "Rajdhani",
-    "Sagar", "Vaibhav", "Trident", "Hindustan", "Prime", "Sundaram",
+    "Shree",
+    "Bharat",
+    "Ganesh",
+    "Krishna",
+    "Meenakshi",
+    "Sunrise",
+    "Apex",
+    "Vertex",
+    "Nova",
+    "Deccan",
+    "Konark",
+    "Anand",
+    "Vishwa",
+    "Rajdhani",
+    "Sagar",
+    "Vaibhav",
+    "Trident",
+    "Hindustan",
+    "Prime",
+    "Sundaram",
 )
 _NAME_MIDDLES: tuple[str, ...] = (
-    "Enterprises", "Traders", "Industries", "Agencies", "Solutions",
-    "Logistics", "Distributors", "Exports", "Technologies", "Fabricators",
+    "Enterprises",
+    "Traders",
+    "Industries",
+    "Agencies",
+    "Solutions",
+    "Logistics",
+    "Distributors",
+    "Exports",
+    "Technologies",
+    "Fabricators",
 )
 _NAME_SUFFIXES: tuple[str, ...] = ("Pvt Ltd", "LLP", "& Co", "Pvt Ltd", "Industries Ltd")
 
@@ -497,7 +523,7 @@ def generate_invoices(
             )
         )
 
-    assert set(inv.customer_id for inv in invoices) <= set(by_id)
+    assert {inv.customer_id for inv in invoices} <= set(by_id)
     return invoices
 
 
@@ -570,9 +596,7 @@ def simulate_outcomes(
             continue
 
         # How long the payment takes, given it happens at all.
-        delay_scale = profile.payment_delay_mean_days * float(
-            np.exp(rng.normal(0.0, 0.35))
-        )
+        delay_scale = profile.payment_delay_mean_days * float(np.exp(rng.normal(0.0, 0.35)))
         delay = int(max(1.0, rng.exponential(delay_scale)))
         invoice.eventual_payment_days = delay
 
@@ -1049,9 +1073,7 @@ def generate_batch(
     resolved_customers = customer_count or max(20, batch_size // 4)
 
     customers = generate_customers(resolved_customers, rng)
-    invoices = generate_invoices(
-        customers, rng, batch_size=batch_size, as_of=resolved_as_of
-    )
+    invoices = generate_invoices(customers, rng, batch_size=batch_size, as_of=resolved_as_of)
     simulate_outcomes(invoices, customers, rng, horizon_days=horizon_days)
     replies = generate_reply_seed_examples(
         rng,
@@ -1078,18 +1100,12 @@ def batch_summary(batch: SyntheticBatch) -> dict[str, Any]:
     lookup = {c.customer_id: c for c in batch.customers}
 
     for archetype in CustomerArchetype:
-        subset = [
-            inv
-            for inv in batch.invoices
-            if lookup[inv.customer_id].archetype is archetype
-        ]
+        subset = [inv for inv in batch.invoices if lookup[inv.customer_id].archetype is archetype]
         if not subset:
             continue
         by_archetype[archetype.value] = {
             "invoices": len(subset),
-            "recovery_rate": round(
-                sum(1 for inv in subset if inv.recovered) / len(subset), 4
-            ),
+            "recovery_rate": round(sum(1 for inv in subset if inv.recovered) / len(subset), 4),
         }
 
     return {

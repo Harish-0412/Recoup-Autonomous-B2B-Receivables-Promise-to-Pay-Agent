@@ -1,14 +1,14 @@
 """Small helpers for model timestamps and stable version names."""
 
-from datetime import datetime, timezone
 import re
 import secrets
+from datetime import UTC, datetime
 
 
 def utc_now() -> datetime:
     """Return the current UTC time as a timezone-aware datetime."""
 
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def utc_now_iso() -> str:

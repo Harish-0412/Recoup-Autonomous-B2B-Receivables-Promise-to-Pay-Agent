@@ -5,7 +5,7 @@ model version, confidence, fallback flag, and a scoring timestamp -- are structu
 A new prediction type inherits them; it cannot forget them.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -68,7 +68,7 @@ class PredictionEnvelope(BaseModel):
         """Treat a naive timestamp as UTC so downstream comparisons never mix kinds."""
 
         if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
+            return value.replace(tzinfo=UTC)
         return value
 
     @model_validator(mode="after")

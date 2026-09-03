@@ -6,9 +6,8 @@ version-stamped on its own. ``PROMPT_VERSION`` is written into the prediction's
 wording that produced it.
 """
 
-from typing import Any
-
 import json
+from typing import Any
 
 from src.ml.schemas import IntentLabel
 

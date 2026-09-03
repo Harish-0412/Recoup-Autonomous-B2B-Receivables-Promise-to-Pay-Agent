@@ -9,10 +9,9 @@ down the LLM or human-review path, whereas a confidently wrong amount could
 create a bogus promise-to-pay record.
 """
 
-from datetime import date, datetime, timedelta
-from typing import Iterable
-
 import re
+from collections.abc import Iterable
+from datetime import date, datetime, timedelta
 
 import dateparser
 
@@ -150,7 +149,7 @@ _AMOUNT_TIER_REGEXES: tuple[tuple[int, re.Pattern[str]], ...] = (
     ),
     (
         3,
-        re.compile(rf"(?P<number>\d{{1,3}}(?:(?:,\d{{2}})+,\d{{3}}|(?:,\d{{3}})+)(?:\.\d+)?)"),
+        re.compile(r"(?P<number>\d{1,3}(?:(?:,\d{2})+,\d{3}|(?:,\d{3})+)(?:\.\d+)?)"),
     ),
     (
         4,
@@ -161,10 +160,36 @@ _AMOUNT_TIER_REGEXES: tuple[tuple[int, re.Pattern[str]], ...] = (
 #: A number followed by one of these counts something that is not money.
 _NON_MONETARY_SUFFIXES: frozenset[str] = frozenset(
     {
-        "day", "days", "week", "weeks", "month", "months", "year", "years",
-        "percent", "pc", "pcs", "units", "unit", "nos", "no", "kg", "kgs",
-        "tons", "boxes", "cartons", "invoices", "invoice", "installments",
-        "instalments", "emis", "emi", "hours", "hrs", "am", "pm",
+        "day",
+        "days",
+        "week",
+        "weeks",
+        "month",
+        "months",
+        "year",
+        "years",
+        "percent",
+        "pc",
+        "pcs",
+        "units",
+        "unit",
+        "nos",
+        "no",
+        "kg",
+        "kgs",
+        "tons",
+        "boxes",
+        "cartons",
+        "invoices",
+        "invoice",
+        "installments",
+        "instalments",
+        "emis",
+        "emi",
+        "hours",
+        "hrs",
+        "am",
+        "pm",
     }
 )
 
@@ -393,7 +418,10 @@ def extract_date(text: str, reference_dt: datetime) -> date | None:
 # ---------------------------------------------------------------------------
 
 _DISPUTE_REASONS: tuple[tuple[str, str], ...] = (
-    (r"\bshort\s*(?:supply|shipped|delivered)\b|\bquantit(?:y|ies)\b|\bshort\s+aaya\b", "quantity_mismatch"),
+    (
+        r"\bshort\s*(?:supply|shipped|delivered)\b|\bquantit(?:y|ies)\b|\bshort\s+aaya\b",
+        "quantity_mismatch",
+    ),
     (r"\bgst\b|\btax\b|\bvat\b|\btds\b", "tax_discrepancy"),
     (
         r"\brate\b|\bprice\b|\bpricing\b|\boverchar\w+\b|\bduplicate\b"

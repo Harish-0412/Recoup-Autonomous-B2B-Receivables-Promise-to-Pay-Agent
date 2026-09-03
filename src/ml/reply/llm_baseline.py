@@ -11,10 +11,9 @@ reason. A collections agent that crashes on a strangely worded reply is worse
 than one that routes it to a human.
 """
 
+import asyncio
 from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
-
-import asyncio
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -89,7 +88,7 @@ class ReplyIntentLLMOutput(BaseModel):
                 value = float(value)
             except ValueError:
                 return value
-        if isinstance(value, (int, float)):
+        if isinstance(value, int | float):
             number = float(value)
             if number >= 2.0:
                 # 95 means 95%. A value just above 1 is a malformed
@@ -201,7 +200,7 @@ async def classify_reply_llm(
             ),
             timeout=timeout_seconds,
         )
-    except (asyncio.TimeoutError, TimeoutError):
+    except TimeoutError:
         return fallback(FallbackReason.TIMEOUT, "LLM did not respond in time.")
     except Exception as exc:
         return fallback(FallbackReason.MALFORMED_OUTPUT, f"LLM output unusable: {exc}")
@@ -209,9 +208,7 @@ async def classify_reply_llm(
     if not isinstance(output, ReplyIntentLLMOutput):
         return fallback(FallbackReason.MALFORMED_OUTPUT, "Unexpected response type from client.")
 
-    promised_date = (
-        extract_date(output.promised_date, reference) if output.promised_date else None
-    )
+    promised_date = extract_date(output.promised_date, reference) if output.promised_date else None
 
     return ReplyIntentPrediction(
         model_version=PROMPT_VERSION,
