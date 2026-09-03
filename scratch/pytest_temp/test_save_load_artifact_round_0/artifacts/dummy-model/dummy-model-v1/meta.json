@@ -1,0 +1,14 @@
+{
+  "model_name": "dummy-model",
+  "model_version": "dummy-model-v1",
+  "trained_at": "2026-09-03T13:30:44.242646Z",
+  "train_rows": 2,
+  "feature_columns": [
+    "a",
+    "b"
+  ],
+  "metrics": {
+    "auc": 0.75
+  },
+  "notes": "phase 0 smoke test"
+}

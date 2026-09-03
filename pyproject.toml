@@ -45,6 +45,9 @@ dependencies = [
     "business-rules>=1.1",
     "dateparser>=1.2",
 
+    # eventsourcing:  aggregate event store, snapshotting, and time-travel replay.
+    "eventsourcing>=9.5",
+
     # --- integrations ---
     # razorpay must stay >=2.0: 1.4.x imports pkg_resources, which modern
     # setuptools no longer provides, so `import razorpay` raises outright.
@@ -73,6 +76,7 @@ ml = [
     "pandas>=2.2",
     "numpy>=1.26",
     "joblib>=1.3",
+    "sdv>=1.38",
 ]
 
 # Depends on the ml extra on purpose: tests/ml/ imports sklearn, xgboost and
@@ -150,6 +154,9 @@ module = [
     "instructor.*",
     "transitions.*",
     "business_rules.*",
+    "eventsourcing.*",
+    "sdv.*",
+    "sdmetrics.*",
 ]
 ignore_missing_imports = true
 

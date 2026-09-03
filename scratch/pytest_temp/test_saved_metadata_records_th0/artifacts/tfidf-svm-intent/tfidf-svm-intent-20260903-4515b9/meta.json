@@ -1,0 +1,11 @@
+{
+  "model_name": "tfidf-svm-intent",
+  "model_version": "tfidf-svm-intent-20260903-4515b9",
+  "trained_at": "2026-09-03T13:30:40.913348Z",
+  "train_rows": 10,
+  "feature_columns": [
+    "word12-charwb35-v1"
+  ],
+  "metrics": {},
+  "notes": null
+}
