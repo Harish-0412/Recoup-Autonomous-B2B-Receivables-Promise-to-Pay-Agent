@@ -145,23 +145,43 @@ This is the part that separates an agent Razorpay would trust with their brand f
 
 ## What Success Looks Like
 
-Run against a full batch, not a cherry-picked example:
+Run against a full batch, not a cherry-picked example. These are the actual
+numbers from `docs/evaluation_report.md`, regenerable with the command below:
 
 ```
-Invoices processed:            600
-Total overdue value:           Rs 1.84 Cr
-Flagged for intervention:      210
-Interventions executed:        210
-Promises made:                 96
-Promises kept (paid on time):  61
-Recovered via agent:           Rs 41.2L
-Recovery rate (of flagged):    29.0%
-False/unnecessary escalations: 6
-Compliance violations:         0
-Cases correctly left alone:    390
+Invoices processed:                      600
+Total overdue value:                     Rs 6.96 Cr
+Decision cycles run:                     5
+Cases flagged for intervention:          513
+Cases left alone:                        87
+Cases handed off to a human:             402
+Interventions executed (all cycles):     505
+Actions blocked by policy (all cycles):  626
+Recovered (of flagged):                  326
+Recovered value:                         Rs 3.97 Cr
+Recovery rate (of flagged):              63.5%
+False/unnecessary interventions:         263
+Cases correctly left alone:              81
+Missed recoveries (left alone, unpaid):  6
+Compliance violations:                   0
+Decision trace entries:                  5452
+Ledger hash chain verified:              yes
 ```
 
-*(Illustrative target shape — the real numbers this README should carry are the ones produced by `scripts/run_batch_demo.py` against the actual synthetic dataset, once generated. Replace this block before submission.)*
+```bash
+python scripts/run_batch_demo.py --batch-size 600 --seed 42 --cycles 5
+```
+
+**Read these honestly — [`docs/evaluation_report.md`](docs/evaluation_report.md)
+explains each caveat in full:**
+
+- The scorer is rules-based, not trained. Probabilities are not calibrated.
+- The synthetic generator samples outcomes *independently of what the agent
+  does*, so the recovery rate measures **targeting** — did the agent act on the
+  invoices that were going to be paid — not causation. No uplift number is
+  claimed, because measuring one needs a holdout arm this simulation lacks.
+- 263 false interventions is a real cost, reported rather than hidden.
+- Zero compliance violations is counted from the decision trace, not asserted.
 
 ## Tech Stack
 
@@ -179,40 +199,51 @@ Cases correctly left alone:    390
 
 ```text
 .
-├── src/
+├── app/
 │   ├── main.py                      # FastAPI app entrypoint
 │   ├── api/
-│   │   ├── invoices.py              # invoice CRUD/listing endpoints
+│   │   ├── health.py                # liveness + DB check
+│   │   ├── invoices.py              # ingest, read, audit trail, run-cycle
 │   │   ├── webhooks.py              # Razorpay webhook receiver
-│   │   └── reports.py               # batch evaluation report endpoint
+│   │   ├── reports.py               # batch evaluation report (dry run)
+│   │   └── policy.py                # the active policy, as served data
 │   ├── core/
+│   │   ├── domain.py                # CaseSnapshot: what a decision reads
 │   │   ├── scorer.py                # expected-value prioritization
-│   │   ├── policy.py                # the gate: discount ceiling, contact caps, ladder
-│   │   ├── escalation.py            # escalation state machine
+│   │   ├── policy.py                # the gate (business-rules)
+│   │   ├── escalation.py            # escalation state machine (transitions)
 │   │   ├── promise_tracker.py       # promise-to-pay logic
-│   │   └── audit.py                 # decision logging
-│   ├── integrations/
-│   │   ├── razorpay_client.py       # Payment Links + Webhooks
-│   │   ├── email_client.py          # Resend
-│   │   └── llm_client.py            # provider-agnostic explanation/reminder text
-│   ├── models/                      # SQLAlchemy/Pydantic models: invoice, customer, promise, audit_log
-│   └── data/
-│       └── synthetic_generator.py   # believable synthetic B2B invoice/customer batch
+│   │   ├── audit.py                 # hash-chained Decision Trace
+│   │   ├── agent.py                 # the decision cycle, end to end
+│   │   ├── evaluation.py            # batch report
+│   │   ├── config.py                # settings
+│   │   └── logging.py               # structlog setup
+│   ├── models/                      # SQLAlchemy tables + shared enums
+│   ├── schemas/                     # API request/response contracts
+│   ├── db/session.py                # async engine + session
+│   └── services/
+│       ├── llm_client.py            # provider-agnostic; instructor for schemas
+│       ├── razorpay_client.py       # Payment Links + webhook verification
+│       ├── resend_client.py         # email delivery
+│       └── repository.py            # all database access
+├── src/
+│   ├── data/synthetic_generator.py  # seeded synthetic batch
+│   └── ml/                          # prediction schemas, reply understanding
+├── alembic/                         # migrations (0001_baseline)
 ├── scripts/
-│   └── run_batch_demo.py            # runs a full batch, prints the evaluation report
-├── tests/
-│   ├── test_scorer.py
-│   ├── test_policy.py
-│   └── test_escalation.py
+│   ├── run_batch_demo.py            # full agent loop + evaluation report
+│   └── generate_synthetic_data.py   # dataset export
+├── tests/                           # 384 tests, no DB or network required
 ├── docs/
-│   ├── architecture.md              # expanded version of this README's architecture section
-│   └── evaluation_report.md         # generated output of the last batch run, committed for judges
+│   ├── architecture.md              # expanded architecture + roadmap
+│   └── evaluation_report.md         # generated output of the last batch run
 ├── .env.example
+├── pyproject.toml
 ├── requirements.txt
 └── README.md
 ```
 
-*(This structure documents the intended layout; adjust as the implementation settles, and keep this section in sync with what actually exists before submission.)*
+*(This reflects what is actually in the repository, not an intended layout.)*
 
 ## Getting Started
 
@@ -275,7 +306,7 @@ Never commit a filled-in `.env`. `.env.example` should contain keys only, no rea
 | `GET` | `/api/v1/reports/batch` | The evaluation report shown above |
 | `GET` | `/api/v1/policy` | View the currently configured policy (ceilings, caps, ladder) |
 
-*(Finalize exact routes as implementation proceeds; keep this table accurate — a README that doesn't match the code is worse than no README.)*
+*(All of the above are implemented and routed. `GET /api/v1/health/db` also exists.)*
 
 ## The Synthetic Dataset
 
@@ -301,20 +332,34 @@ Use this table as a running checklist while building — update it honestly as p
 
 | Piece | Status |
 |---|---|
-| Synthetic dataset generator | ☐ Not started |
-| Prioritization scorer | ☐ Not started |
-| Policy / gate engine | ☐ Not started |
-| Razorpay Payment Links integration | ☐ Not started |
-| Razorpay webhook verification | ☐ Not started |
-| Promise-to-pay tracker | ☐ Not started |
-| Escalation state machine | ☐ Not started |
-| Audit trail | ☐ Not started |
-| Email delivery (Resend) | ☐ Not started |
-| Batch evaluation report | ☐ Not started |
-| One handled failure case | ☐ Not started |
-| Unit tests for scorer/policy | ☐ Not started |
-| Architecture doc | ☐ Not started |
+| Synthetic dataset generator | ☑ Done — `src/data/synthetic_generator.py`, seeded and tested |
+| ML prediction schemas & contracts | ☑ Done — `src/ml/schemas/` |
+| Reply understanding (LLM baseline) | ☑ Done — `instructor`-backed, degrades to `OTHER` |
+| Prioritization scorer | ☑ Done — rules-based; declares `fallback_used=True` |
+| Policy / gate engine | ☑ Done — `business-rules`; rules compiled from config |
+| Escalation state machine | ☑ Done — `transitions`; `auto_transitions=False` |
+| Audit trail (Decision Trace) | ☑ Done — append-only, hash-chained, tamper-tested |
+| Promise-to-pay tracker | ☑ Done — `app/core/promise_tracker.py` |
+| Database models + migrations | ☑ Done — 7 tables, Alembic baseline |
+| API surface | ☑ Done — all 7 documented routes live |
+| Razorpay Payment Links integration | ☑ Client done — not yet called from the agent loop |
+| Razorpay webhook verification | ☑ Done — signature-checked and idempotent |
+| Email delivery (Resend) | ☑ Client done — not yet called from the agent loop |
+| Batch evaluation report | ☑ Done — `docs/evaluation_report.md`, regenerable |
+| One handled failure case | ☑ Done — malformed LLM output → `OTHER` + human queue |
+| Unit tests for scorer/policy | ☑ Done — 384 tests |
+| Architecture doc | ☑ Done — `docs/architecture.md` |
 | Pitch video | ☐ Not started |
+
+**Known gaps, stated plainly:**
+
+- The action executor is not wired. The agent decides, gates and records
+  correctly, and the Razorpay/Resend clients work, but nothing calls them from
+  `run_cycle` yet — no real payment link is created and no email is sent.
+- The recovery model is rules-based, not trained. Every prediction says so via
+  `fallback_used=True`.
+- Reply understanding is not connected to the decision cycle. It classifies
+  correctly in isolation; `run_cycle` does not yet consume its output.
 
 ## What's Deliberately Out of Scope for the Buildathon
 

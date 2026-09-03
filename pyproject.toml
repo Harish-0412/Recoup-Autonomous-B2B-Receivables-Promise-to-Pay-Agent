@@ -14,7 +14,7 @@ dependencies = [
     "pydantic-settings==2.6.1",
     "python-dotenv==1.0.1",
     "httpx==0.28.1",
-    "razorpay==1.4.1",
+    "razorpay==2.0.1",
     "resend==2.42.0",
     "groq==1.7.0",
     "google-generativeai==0.8.3",

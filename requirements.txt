@@ -20,7 +20,9 @@ business-rules>=1.1
 # groq must stay >=1.0: 0.6.0 passes `proxies=` to httpx, which httpx>=0.28
 # removed, so constructing a client raises TypeError.
 groq>=1.7
-razorpay>=1.4
+# razorpay must stay >=2.0: 1.4.x imports pkg_resources, which modern
+# setuptools no longer provides, so `import razorpay` raises ModuleNotFoundError.
+razorpay>=2.0
 resend>=2.4
 
 # --- ML additions ---

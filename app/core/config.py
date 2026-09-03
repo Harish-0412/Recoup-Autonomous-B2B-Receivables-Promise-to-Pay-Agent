@@ -54,7 +54,9 @@ class Settings(BaseSettings):
         description="Groq API key for LLM inference",
     )
     GROQ_MODEL: str = Field(
-        default="llama-3.1-70b-versatile",
+        # llama-3.1-70b-versatile was decommissioned by Groq; requests against
+        # it now fail with model_not_found.
+        default="llama-3.3-70b-versatile",
         description="Groq model to use",
     )
 
@@ -88,6 +90,21 @@ class Settings(BaseSettings):
         default=30,
         description="Days to respect opt-out before re-contact",
         ge=1,
+    )
+    DEFAULT_MAX_CONTACTS_PER_INVOICE: int = Field(
+        default=4,
+        description="Total messages the agent may send about one invoice",
+        ge=0,
+    )
+    DEFAULT_MIN_DAYS_OVERDUE_TO_CONTACT: int = Field(
+        default=1,
+        description="Do not contact until an invoice is at least this overdue",
+        ge=0,
+    )
+    DEFAULT_MAX_DISCOUNT_AMOUNT: float | None = Field(
+        default=None,
+        description="Absolute discount ceiling in rupees, on top of the percentage",
+        ge=0,
     )
 
     # Scheduler
