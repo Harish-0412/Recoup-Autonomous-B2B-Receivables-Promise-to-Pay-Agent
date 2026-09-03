@@ -112,9 +112,7 @@ class RecoveryExplainer:
             return None
         try:
             ordered = frame[list(self.feature_columns)]
-            matrix = (
-                self._transform.transform(ordered) if self._transform is not None else ordered
-            )
+            matrix = self._transform.transform(ordered) if self._transform is not None else ordered
             values = self._explainer.shap_values(matrix)
             array = np.asarray(values)
             if array.ndim == 3:

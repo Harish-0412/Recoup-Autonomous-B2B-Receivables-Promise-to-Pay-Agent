@@ -127,7 +127,9 @@ def calibration_bins(
 
     for index in range(n_bins):
         lower, upper = float(edges[index]), float(edges[index + 1])
-        if index == n_bins - 1:
+        # Bins are half-open except the last, which closes on the right so a
+        # prediction of exactly 1.0 lands in a bin instead of being dropped.
+        if index == n_bins - 1:  # noqa: SIM108 - the asymmetry is the point
             mask = (p >= lower) & (p <= upper)
         else:
             mask = (p >= lower) & (p < upper)

@@ -174,9 +174,7 @@ def calibrate(
     try:
         from sklearn.frozen import FrozenEstimator
 
-        calibrator = CalibratedClassifierCV(
-            FrozenEstimator(estimator), method=method
-        )
+        calibrator = CalibratedClassifierCV(FrozenEstimator(estimator), method=method)
     except ImportError:  # scikit-learn < 1.6
         calibrator = CalibratedClassifierCV(estimator, method=method, cv="prefit")
 

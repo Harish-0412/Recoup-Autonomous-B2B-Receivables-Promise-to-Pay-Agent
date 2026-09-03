@@ -19,9 +19,8 @@ Two rules this module holds to:
   refuses to carry them -- and a test asserts they never appear as keys here.
 """
 
-from datetime import date
-
 import math
+from datetime import date
 
 from app.core.domain import CaseSnapshot
 

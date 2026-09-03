@@ -24,3 +24,7 @@ build/
 
 # Reply-model evaluation output: regenerate with scripts/train_reply_classifier.py
 data/reply_model/
+
+# Recovery-model evaluation output: regenerate with scripts/train_recovery_model.py.
+# The committed summary of these numbers lives in docs/recovery_model_card.md.
+data/recovery_model/

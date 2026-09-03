@@ -13,10 +13,9 @@ model does not stop a batch, and the batch report can still say exactly which
 invoices were scored by what.
 """
 
+import math
 from datetime import date
 from typing import Protocol, runtime_checkable
-
-import math
 
 from app.core.domain import CaseSnapshot
 from src.ml.config import MLSettings
@@ -160,9 +159,7 @@ class ModelBasedScorer:
         if self.explainer is not None:
             drivers = self.explainer.top_drivers(features, limit=3)
 
-        version = (
-            self.metadata.model_version if self.metadata is not None else self.model.name
-        )
+        version = self.metadata.model_version if self.metadata is not None else self.model.name
 
         return RecoveryScorePrediction(
             invoice_id=case.invoice.invoice_id,

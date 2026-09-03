@@ -27,9 +27,7 @@ from src.ml.recovery.models import (
 
 @pytest.fixture(scope="module")
 def batch():
-    return generate_batch(
-        batch_size=6000, customer_count=900, seed=42, timeline_days=540
-    )
+    return generate_batch(batch_size=6000, customer_count=900, seed=42, timeline_days=540)
 
 
 @pytest.fixture(scope="module")
@@ -298,8 +296,13 @@ def test_value_at_risk_rejects_a_non_positive_k():
 def test_comparison_needs_both_classes_present():
     with pytest.raises(ValueError):
         compare_rankings(
-            "test", [1, 1], [0.6, 0.7], [0.5, 0.4], [1.0, 1.0],
-            challenger="a", incumbent="b",
+            "test",
+            [1, 1],
+            [0.6, 0.7],
+            [0.5, 0.4],
+            [1.0, 1.0],
+            challenger="a",
+            incumbent="b",
         )
 
 

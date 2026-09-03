@@ -32,6 +32,7 @@ from app.core.policy import PolicyConfig  # noqa: E402
 from app.core.scorer import ScoringConfig  # noqa: E402
 from app.models.enums import EscalationState, InterventionTier  # noqa: E402
 from src.data.synthetic_generator import generate_batch  # noqa: E402
+from src.ml.recovery.scorer import get_recovery_scorer  # noqa: E402
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -60,6 +61,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument("--show", type=int, default=8, help="How many top-ranked cases to print.")
+    parser.add_argument(
+        "--use-model",
+        action="store_true",
+        help=(
+            "Score with the trained recovery model instead of the rules. Falls back "
+            "to the rules per invoice if no artifact has been trained yet."
+        ),
+    )
     parser.add_argument(
         "--write-report",
         type=Path,
@@ -96,6 +105,21 @@ def advance_case(case: CaseSnapshot, result: CycleResult, *, days: int) -> CaseS
     return case.model_copy(update={"invoice": invoice.model_copy(update=updates)})
 
 
+def _scorer_label(scorer) -> str:
+    """Describe which scorer actually ran, for the report header.
+
+    Asked of the scorer rather than of ``--use-model``, because the two can
+    disagree: requesting the model when no artifact has been trained yields the
+    rules-based scorer, and the report must say what happened, not what was
+    asked for.
+    """
+
+    if scorer is None or getattr(scorer, "name", "") == "rules-based":
+        return "rules-based (`fallback_used=True`)"
+    version = getattr(getattr(scorer, "metadata", None), "model_version", "trained model")
+    return f"model-based (`{version}`, calibrated)"
+
+
 def simulate(
     cases: list[CaseSnapshot],
     *,
@@ -103,6 +127,7 @@ def simulate(
     ledger: DecisionLedger,
     cycles: int,
     gap_days: int,
+    scorer=None,
 ) -> tuple[list[CycleResult], list[dict[str, int]]]:
     """Run several decision cycles and return the final state of each case.
 
@@ -118,7 +143,7 @@ def simulate(
     summaries: list[dict[str, int]] = []
 
     for cycle in range(1, cycles + 1):
-        results = run_batch(current, config=config, ledger=ledger)
+        results = run_batch(current, config=config, ledger=ledger, scorer=scorer)
         by_id = {result.invoice_id: result for result in results}
         latest.update(by_id)
 
@@ -167,6 +192,11 @@ def main(argv: list[str] | None = None) -> int:
         scoring=ScoringConfig(horizon_days=batch.horizon_days),
     )
 
+    # Built once for the whole demo: loading the artifact and its SHAP
+    # explainer is expensive, and every cycle scores the same book.
+    scorer = get_recovery_scorer(use_model=True) if args.use_model else None
+    scorer_label = _scorer_label(scorer)
+
     ledger = DecisionLedger()
     results, cycle_summaries = simulate(
         cases,
@@ -174,6 +204,7 @@ def main(argv: list[str] | None = None) -> int:
         ledger=ledger,
         cycles=args.cycles,
         gap_days=args.min_contact_gap_days,
+        scorer=scorer,
     )
     report = build_report(results, ledger=ledger, outcomes=outcomes, cycles_run=args.cycles)
 
@@ -223,7 +254,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.write_report:
         args.write_report.parent.mkdir(parents=True, exist_ok=True)
         args.write_report.write_text(
-            _render_markdown(report, args, batch.generator_version, batch.horizon_days),
+            _render_markdown(
+                report, args, batch.generator_version, batch.horizon_days, scorer_label
+            ),
             encoding="utf-8",
         )
         print(f"Wrote {args.write_report}")
@@ -231,7 +264,13 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _render_markdown(report, args, generator_version: str, horizon_days: int) -> str:
+def _render_markdown(
+    report,
+    args,
+    generator_version: str,
+    horizon_days: int,
+    scorer_label: str = "rules-based (`fallback_used=True`)",
+) -> str:
     """Render the committed report file.
 
     Includes the exact command that produced it, so anyone can re-run it and
@@ -240,7 +279,7 @@ def _render_markdown(report, args, generator_version: str, horizon_days: int) ->
 
     command = (
         f"python scripts/run_batch_demo.py --batch-size {args.batch_size} "
-        f"--seed {args.seed} --cycles {args.cycles}"
+        f"--seed {args.seed} --cycles {args.cycles}" + (" --use-model" if args.use_model else "")
     )
     lines = [
         "# Batch Evaluation Report",
@@ -265,15 +304,29 @@ def _render_markdown(report, args, generator_version: str, horizon_days: int) ->
         f"| Recovery horizon | {horizon_days} days |",
         f"| Discount ceiling | {args.discount_ceiling:g}% |",
         f"| Minimum contact gap | {args.min_contact_gap_days} days |",
-        "| Scorer | rules-based (`fallback_used=True`) |",
+        f"| Scorer | {scorer_label} |",
         "",
         "## How to read these numbers",
         "",
-        "**The scorer is rules-based, not trained.** Every recovery probability",
-        "in this run came from a hand-tuned logistic model, returned with",
-        "`fallback_used=True` and `resolved_by=rules_based_scorer`. Phase 4",
-        "replaces it with a trained, calibrated model; until then these",
-        "probabilities are not calibrated and should not be read as such.",
+        *(
+            [
+                "**The scorer is the trained model.** Every recovery probability",
+                "in this run came from the gradient-boosted model, isotonically",
+                "calibrated on a held-out validation split, so these numbers can",
+                "be read as probabilities. Any invoice the model could not score",
+                "fell back to the rules and is marked `fallback_used=True` in the",
+                "decision trace.",
+            ]
+            if not scorer_label.startswith("rules-based")
+            else [
+                "**The scorer is rules-based, not trained.** Every recovery",
+                "probability in this run came from a hand-tuned logistic model,",
+                "returned with `fallback_used=True` and",
+                "`resolved_by=rules_based_scorer`. These probabilities are not",
+                "calibrated and should not be read as such; re-run with",
+                "`--use-model` after training to score with the calibrated model.",
+            ]
+        ),
         "",
         "**The agent did not cause these recoveries.** The synthetic generator",
         "samples each invoice's outcome independently of what the agent does,",

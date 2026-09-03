@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import timedelta
 
 import pytest
 
@@ -224,9 +224,7 @@ def test_risk_escalating_customers_score_below_their_all_time_ratio(batch):
 
     from src.data.synthetic_generator import CustomerArchetype
 
-    escalating = [
-        c for c in batch.customers if c.archetype is CustomerArchetype.RISK_ESCALATING
-    ]
+    escalating = [c for c in batch.customers if c.archetype is CustomerArchetype.RISK_ESCALATING]
     assert escalating
 
     gaps = [

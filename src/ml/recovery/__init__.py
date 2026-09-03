@@ -32,8 +32,8 @@ from src.ml.recovery.evaluation import (
     calibration_bins,
     compare_rankings,
     evaluate,
-    value_at_risk_captured_at_k,
     rules_based_scores,
+    value_at_risk_captured_at_k,
 )
 from src.ml.recovery.explain import RecoveryExplainer
 from src.ml.recovery.models import (

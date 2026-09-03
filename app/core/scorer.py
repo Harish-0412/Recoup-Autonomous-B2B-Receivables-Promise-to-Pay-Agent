@@ -8,14 +8,20 @@ other way -- probability of recovery, exposure still outstanding, and a time
 weight -- to produce an Expected *Recovery*. The reference projects cited in
 ``docs/architecture.md`` walk through the credit-scoring side of that parallel.
 
-**This is the rules-based scorer, and it says so.** Phase 4 replaces
-``estimate_recovery_probability`` with a trained, calibrated model. Until then
-every prediction is returned with ``fallback_used=True`` and
-``resolved_by=RULES_BASED_SCORER``, so nothing downstream can mistake a
-hand-tuned logistic for a fitted one, and the batch report says which produced
-its numbers. The coefficients below are deliberately *not* copied from the
-synthetic generator's outcome model -- a scorer fitted by hand to the exact
-data-generating process would report an accuracy that means nothing.
+**This module owns the formula, not the probability.** ``score_case`` takes an
+optional ``RecoveryScorer``; passing the trained ``ModelBasedScorer`` swaps a
+learned, calibrated P(recovery) into the formula above while leaving the
+urgency weight, the intervention cost and the tiering untouched. Passing
+nothing falls to ``estimate_recovery_probability`` below, the hand-written
+logistic this project shipped first.
+
+**The rules-based path says so, always.** Every prediction it produces carries
+``fallback_used=True`` and ``resolved_by=RULES_BASED_SCORER``, so nothing
+downstream can mistake a hand-tuned logistic for a fitted one, and the batch
+report says which produced its numbers. The coefficients below are deliberately
+*not* copied from the synthetic generator's outcome model -- a scorer fitted by
+hand to the exact data-generating process would report an accuracy that means
+nothing.
 
 The false-intervention cost is why ``WAIT`` exists at all. Contacting a
 customer who was about to pay anyway is not free, and the batch report counts
@@ -25,8 +31,14 @@ those as a cost rather than quietly dropping them.
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:  # pragma: no cover - import cycle guard
+    # src.ml.recovery.scorer imports this module for the rules fallback, so the
+    # reference here stays a type-only one.
+    from src.ml.recovery.scorer import RecoveryScorer
 
 from app.core.domain import CaseSnapshot
 from app.models.enums import InterventionTier
@@ -174,25 +186,20 @@ def estimate_recovery_probability(case: CaseSnapshot) -> tuple[float, list[Featu
     return _sigmoid(logit), drivers
 
 
-def score_case(case: CaseSnapshot, config: ScoringConfig | None = None) -> InvoiceScore:
-    """Score one invoice and recommend an intervention tier."""
+def _rules_prediction(
+    invoice_id: str,
+    probability: float,
+    drivers: list[FeatureDriver],
+) -> RecoveryScorePrediction:
+    """Wrap a hand-written score in the shared prediction envelope.
 
-    settings = config or ScoringConfig()
-    invoice = case.invoice
+    ``fallback_used=True`` is not an error report here -- it is the honest
+    label. A hand-tuned logistic must never be mistaken downstream for a fitted
+    one, so the rules path always declares itself as the fallback resolver.
+    """
 
-    probability, drivers = estimate_recovery_probability(case)
-    weight = urgency_weight(invoice.days_overdue, horizon_days=settings.horizon_days)
-    outstanding = invoice.outstanding
-
-    # Expected recovery if we act. The value *at risk* -- and therefore worth
-    # spending an intervention on -- is what a non-certain recovery leaves on
-    # the table, which is why (1 - p) appears rather than p.
-    expected_recovery = probability * outstanding
-    value_at_risk = (1.0 - probability) * outstanding * weight
-    expected_value = value_at_risk - settings.intervention_cost
-
-    prediction = RecoveryScorePrediction(
-        invoice_id=invoice.invoice_id,
+    return RecoveryScorePrediction(
+        invoice_id=invoice_id,
         p_recovery_30d=round(probability, 6),
         calibrated=False,
         top_drivers=drivers[:5],
@@ -206,6 +213,48 @@ def score_case(case: CaseSnapshot, config: ScoringConfig | None = None) -> Invoi
         ),
         scored_at=utc_now(),
     )
+
+
+def score_case(
+    case: CaseSnapshot,
+    config: ScoringConfig | None = None,
+    scorer: RecoveryScorer | None = None,
+) -> InvoiceScore:
+    """Score one invoice and recommend an intervention tier.
+
+    ``scorer`` is the seam Phase 4 opens. Passing a ``RecoveryScorer`` -- the
+    trained ``ModelBasedScorer`` in practice -- makes the probability in the
+    expected-value formula a learned, calibrated one; the tiering, the urgency
+    weight and the intervention cost are unchanged, because replacing the
+    probability was the whole point. Passing nothing keeps the hand-written
+    logistic below, so a clone with no trained artifact behaves exactly as it
+    did before.
+
+    Note that the scorer supplies the *prediction*, never the decision. A
+    model-based scorer that fails degrades to the rules for that one invoice
+    and says so on ``prediction.fallback``; this function does not branch on
+    which one produced the number.
+    """
+
+    settings = config or ScoringConfig()
+    invoice = case.invoice
+
+    if scorer is None:
+        probability, drivers = estimate_recovery_probability(case)
+        prediction = _rules_prediction(invoice.invoice_id, probability, drivers)
+    else:
+        prediction = scorer.score(case)
+        probability = prediction.p_recovery_30d
+
+    weight = urgency_weight(invoice.days_overdue, horizon_days=settings.horizon_days)
+    outstanding = invoice.outstanding
+
+    # Expected recovery if we act. The value *at risk* -- and therefore worth
+    # spending an intervention on -- is what a non-certain recovery leaves on
+    # the table, which is why (1 - p) appears rather than p.
+    expected_recovery = probability * outstanding
+    value_at_risk = (1.0 - probability) * outstanding * weight
+    expected_value = value_at_risk - settings.intervention_cost
 
     tier, rationale = _decide_tier(
         probability=probability,
@@ -283,10 +332,12 @@ def _decide_tier(
 
 
 def rank_cases(
-    cases: list[CaseSnapshot], config: ScoringConfig | None = None
+    cases: list[CaseSnapshot],
+    config: ScoringConfig | None = None,
+    scorer: RecoveryScorer | None = None,
 ) -> list[InvoiceScore]:
     """Score every case and return them highest expected value first."""
 
     settings = config or ScoringConfig()
-    scores = [score_case(case, settings) for case in cases]
+    scores = [score_case(case, settings, scorer) for case in cases]
     return sorted(scores, key=lambda score: score.expected_value, reverse=True)

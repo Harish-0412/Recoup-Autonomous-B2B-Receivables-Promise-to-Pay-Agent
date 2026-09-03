@@ -172,10 +172,31 @@ Ledger hash chain verified:              yes
 python scripts/run_batch_demo.py --batch-size 600 --seed 42 --cycles 5
 ```
 
+### Training the recovery model
+
+The model artifact is not committed (trained binaries never are). Train it in
+about a minute on a laptop CPU, then re-run the demo against it:
+
+```bash
+python scripts/train_recovery_model.py --batch-size 6000 --seed 42
+```
+
+```bash
+python scripts/run_batch_demo.py --batch-size 600 --seed 42 --cycles 5 --use-model
+```
+
+The training script trains a logistic baseline, gradient-boosted trees and a
+small neural net on the same temporal split, calibrates each on validation, and
+prints all three against the rules-based scorer they are meant to replace.
+[`docs/recovery_model_card.md`](docs/recovery_model_card.md) records the
+results, including the ones that did not go the way a bigger model would want.
+
 **Read these honestly — [`docs/evaluation_report.md`](docs/evaluation_report.md)
 explains each caveat in full:**
 
-- The scorer is rules-based, not trained. Probabilities are not calibrated.
+- The scorer above is the rules-based one (the default). Add `--use-model` to
+  score with the trained, calibrated model instead — see
+  [`docs/recovery_model_card.md`](docs/recovery_model_card.md).
 - The synthetic generator samples outcomes *independently of what the agent
   does*, so the recovery rate measures **targeting** — did the agent act on the
   invoices that were going to be paid — not causation. No uplift number is
@@ -336,6 +357,7 @@ Use this table as a running checklist while building — update it honestly as p
 | ML prediction schemas & contracts | ☑ Done — `src/ml/schemas/` |
 | Reply understanding (LLM baseline) | ☑ Done — `instructor`-backed, degrades to `OTHER` |
 | Prioritization scorer | ☑ Done — rules-based; declares `fallback_used=True` |
+| Recovery-probability model | ☑ Done — `xgb-recovery`, calibrated; AUC 0.779 vs 0.732 rules ([model card](docs/recovery_model_card.md)) |
 | Policy / gate engine | ☑ Done — `business-rules`; rules compiled from config |
 | Escalation state machine | ☑ Done — `transitions`; `auto_transitions=False` |
 | Audit trail (Decision Trace) | ☑ Done — append-only, hash-chained, tamper-tested |
@@ -356,8 +378,11 @@ Use this table as a running checklist while building — update it honestly as p
 - The action executor is not wired. The agent decides, gates and records
   correctly, and the Razorpay/Resend clients work, but nothing calls them from
   `run_cycle` yet — no real payment link is created and no email is sent.
-- The recovery model is rules-based, not trained. Every prediction says so via
-  `fallback_used=True`.
+- The recovery model is trained but **off by default**. Set `USE_MODEL_SCORER=true`
+  (or pass `--use-model` to the batch demo) to score with it; the rules stay the
+  default so a fresh clone with no trained artifact behaves predictably. Either
+  way the model is trained on **synthetic** data — the metrics show the pipeline
+  recovers a signal that was deliberately planted, not real-world accuracy.
 - Reply understanding is not connected to the decision cycle. It classifies
   correctly in isolation; `run_cycle` does not yet consume its output.
 
@@ -376,7 +401,7 @@ This MVP is **production-shaped, not production-hardened** — typed models, a r
 
 - Multi-tenant auth (OIDC/JWT) and per-business row-level data isolation
 - WhatsApp Business API delivery once verification clears
-- A trained, calibrated recovery-probability model replacing the rules-based scorer, evaluated via proper train/held-out splits
+- Multi-horizon (7/14/30/60-day) survival-style recovery prediction, and online retraining from real webhook-confirmed payments
 - Idempotency and retry-safety hardening on the webhook handler — payments infrastructure cannot afford to double-count a confirmation
 - Secrets management, observability, and backup/restore procedures once this handles real customer communication
 - A real legal/compliance review of the escalation cadence against actual debt-collection practice guidance before any real customer is contacted

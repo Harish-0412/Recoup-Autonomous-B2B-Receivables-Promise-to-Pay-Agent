@@ -18,6 +18,9 @@ approved decision has nothing to send.
 
 from __future__ import annotations
 
+from functools import lru_cache
+from typing import TYPE_CHECKING
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.audit import DecisionLedger, append_decision_trace
@@ -32,6 +35,36 @@ from app.core.policy import (
 )
 from app.core.scorer import InvoiceScore, ScoringConfig, score_case
 from app.models.enums import DecisionOutcome, EscalationState, InterventionTier
+
+if TYPE_CHECKING:  # pragma: no cover - import cycle guard
+    from src.ml.recovery.scorer import RecoveryScorer
+
+
+@lru_cache(maxsize=1)
+def default_recovery_scorer() -> RecoveryScorer | None:
+    """The configured scorer, built once per process.
+
+    Imported lazily and cached because loading the model artifact and building
+    its SHAP explainer is expensive and must not happen per invoice. The import
+    is deferred rather than top-level so that ``app.core`` stays importable in
+    an environment with no ML dependencies installed.
+
+    ``get_recovery_scorer`` already returns the rules-based scorer when the
+    flag is off or no artifact has been trained yet, so the only failure left
+    to absorb here is the ML package being absent entirely. That returns
+    ``None``, which routes ``score_case`` down its own built-in rules path --
+    the one branch that needs no ML import at all. Returning a
+    ``RulesBasedScorer`` here instead would be wrong: importing it requires the
+    very package that just failed to import.
+    """
+
+    try:
+        from src.ml.recovery.scorer import get_recovery_scorer
+
+        return get_recovery_scorer()
+    except Exception:  # pragma: no cover - environment without ML extras
+        return None
+
 
 #: The next rung from each state. The ladder -- not the scorer -- decides
 #: *which* move comes next; the scorer only decides *whether* to move at all.
@@ -146,13 +179,21 @@ def run_cycle(
     config: AgentConfig | None = None,
     engine: PolicyEngine | None = None,
     ledger: DecisionLedger | None = None,
+    scorer: RecoveryScorer | None = None,
 ) -> CycleResult:
-    """Run one full decision cycle over one case."""
+    """Run one full decision cycle over one case.
+
+    ``scorer`` selects where P(recovery) comes from. Left at ``None`` the
+    configured default applies, which is the trained model when
+    ``USE_MODEL_SCORER`` is set and an artifact exists, and the hand-written
+    rules otherwise.
+    """
 
     settings = config or AgentConfig()
     policy_engine = engine or PolicyEngine(settings.policy, ledger=ledger)
+    active_scorer = scorer if scorer is not None else default_recovery_scorer()
 
-    score = score_case(case, settings.scoring)
+    score = score_case(case, settings.scoring, active_scorer)
     fsm = EscalationCase(case, policy_engine, ledger=ledger)
     state_before = fsm.escalation_state
 
@@ -252,20 +293,27 @@ def run_batch(
     *,
     config: AgentConfig | None = None,
     ledger: DecisionLedger | None = None,
+    scorer: RecoveryScorer | None = None,
 ) -> list[CycleResult]:
     """Run one cycle over every case, highest expected value first.
 
-    One ``PolicyEngine`` is built for the batch rather than per case: compiling
-    the rule data is the expensive part, and every case in a run is governed by
-    the same policy by definition.
+    One ``PolicyEngine`` and one ``RecoveryScorer`` are built for the batch
+    rather than per case. For the policy engine, compiling the rule data is the
+    expensive part; for the scorer it is deserialising the model and building
+    its SHAP explainer, which must happen once per run and not once per
+    invoice.
     """
 
     settings = config or AgentConfig()
     engine = PolicyEngine(settings.policy, ledger=ledger)
+    active_scorer = scorer if scorer is not None else default_recovery_scorer()
 
     scored = sorted(
-        ((case, score_case(case, settings.scoring)) for case in cases),
+        ((case, score_case(case, settings.scoring, active_scorer)) for case in cases),
         key=lambda pair: pair[1].expected_value,
         reverse=True,
     )
-    return [run_cycle(case, config=settings, engine=engine, ledger=ledger) for case, _ in scored]
+    return [
+        run_cycle(case, config=settings, engine=engine, ledger=ledger, scorer=active_scorer)
+        for case, _ in scored
+    ]
