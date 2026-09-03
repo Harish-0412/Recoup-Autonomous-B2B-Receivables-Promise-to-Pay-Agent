@@ -108,6 +108,15 @@ module = [
 ]
 ignore_missing_imports = true
 
+# numpy's bundled stubs use PEP 695 `type` statements, which mypy only parses
+# when targeting 3.12+. This project targets 3.11, and instructor pulls numpy
+# into the type-check graph, so skip analysing those stubs rather than lowering
+# the target for the whole codebase.
+[[tool.mypy.overrides]]
+module = ["numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
