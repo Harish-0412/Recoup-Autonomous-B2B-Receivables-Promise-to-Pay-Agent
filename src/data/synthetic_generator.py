@@ -741,6 +741,14 @@ def _render_date_phrase(
     return f"within {weeks} weeks", reference + timedelta(weeks=weeks)
 
 
+# Public aliases: the Stage B dataset builder renders amounts and dates exactly
+# the way the seed set does, so both draw on one implementation.
+inr_group = _inr_group
+render_amount = _render_amount
+render_date_phrase = _render_date_phrase
+draw_amount = _draw_amount
+
+
 class _Template(BaseModel):
     """One reply template with its ground truth declared up front."""
 

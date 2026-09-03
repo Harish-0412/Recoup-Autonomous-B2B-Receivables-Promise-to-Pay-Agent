@@ -21,3 +21,6 @@ data/synthetic/
 *.egg-info/
 dist/
 build/
+
+# Reply-model evaluation output: regenerate with scripts/train_reply_classifier.py
+data/reply_model/

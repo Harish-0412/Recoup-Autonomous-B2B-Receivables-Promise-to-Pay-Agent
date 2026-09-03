@@ -288,82 +288,160 @@ def test_strict_retry_prompt_demands_bare_json():
 # ---------------------------------------------------------------------------
 
 
-class _ScriptedClient:
-    """Concrete LLMClient whose raw responses are scripted."""
+class _FakeCompletions:
+    """Stands in for ``instructor``'s ``chat.completions`` namespace.
 
-    def __init__(self, responses):
-        self.responses = list(responses)
-        self.prompts: list[str] = []
+    Mocking here rather than at the provider SDK is the whole point of the
+    integration: everything below instructor -- JSON extraction, schema
+    coercion, the retry-with-validation-errors loop -- is the library's
+    responsibility and is its own project's tests to run. What this codebase
+    still owns is what happens on either side of that call.
+    """
 
-    async def generate(self, prompt, system_prompt=None):
-        self.prompts.append(prompt)
-        return self.responses.pop(0)
+    def __init__(self, result=None, error=None):
+        self.result = result
+        self.error = error
+        self.calls: list[dict] = []
 
-    def is_available(self):
-        return True
+    async def create(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.error is not None:
+            raise self.error
+        return self.result
 
 
-def _client_class():
-    module = pytest.importorskip(
+class _FakeInstructor:
+    def __init__(self, result=None, error=None):
+        self.chat = type("Chat", (), {"completions": _FakeCompletions(result, error)})()
+
+    @property
+    def calls(self):
+        return self.chat.completions.calls
+
+
+def _client_module():
+    return pytest.importorskip(
         "app.services.llm_client",
         reason="backend dependencies not installed",
     )
-    return module
 
 
-def test_generate_structured_parses_clean_json():
-    module = _client_class()
-    scripted = type("C", (_ScriptedClient, module.LLMClient), {})(
-        ['{"intent": "PROMISE_TO_PAY", "confidence": 0.9}']
+def _client_with(result=None, error=None):
+    """A concrete LLMClient wired to a fake instructor client."""
+
+    module = _client_module()
+
+    class _Client(module.LLMClient):
+        def __init__(self):
+            self.structured = _FakeInstructor(result=result, error=error)
+            self.model = "test-model"
+
+        async def generate(self, prompt, system_prompt=None):
+            return "unstructured text"
+
+        def is_available(self):
+            return True
+
+    return module, _Client()
+
+
+def test_generate_structured_returns_the_validated_model():
+    _, client = _client_with(
+        result=ReplyIntentLLMOutput(intent=IntentLabel.PROMISE_TO_PAY, confidence=0.9)
     )
 
-    result = run(scripted.generate_structured("p", ReplyIntentLLMOutput))
+    result = run(client.generate_structured("p", ReplyIntentLLMOutput))
 
     assert result.intent is IntentLabel.PROMISE_TO_PAY
-    assert len(scripted.prompts) == 1
 
 
-def test_generate_structured_survives_markdown_fences_and_prose():
-    module = _client_class()
-    scripted = type("C", (_ScriptedClient, module.LLMClient), {})(
-        ['Sure!\n```json\n{"intent": "DISPUTE", "confidence": 0.8}\n```\nHope that helps.']
+def test_generate_structured_asks_instructor_for_the_schema_with_retries():
+    """The schema and the retry budget must actually reach instructor.
+
+    Without this, a refactor that dropped ``response_model`` would still pass
+    every other test in this file while silently disabling validation.
+    """
+
+    module, client = _client_with(
+        result=ReplyIntentLLMOutput(intent=IntentLabel.DISPUTE, confidence=0.8)
     )
 
-    result = run(scripted.generate_structured("p", ReplyIntentLLMOutput))
+    run(client.generate_structured("p", ReplyIntentLLMOutput, system_prompt="sys"))
 
-    assert result.intent is IntentLabel.DISPUTE
-
-
-def test_generate_structured_retries_once_then_succeeds():
-    module = _client_class()
-    scripted = type("C", (_ScriptedClient, module.LLMClient), {})(
-        ["I cannot do that.", '{"intent": "OPT_OUT", "confidence": 0.99}']
-    )
-
-    result = run(scripted.generate_structured("p", ReplyIntentLLMOutput))
-
-    assert result.intent is IntentLabel.OPT_OUT
-    assert len(scripted.prompts) == 2
+    (call,) = client.structured.calls
+    assert call["response_model"] is ReplyIntentLLMOutput
+    assert call["max_retries"] == module.STRUCTURED_MAX_RETRIES
+    assert call["messages"][0] == {"role": "system", "content": "sys"}
+    assert call["messages"][1] == {"role": "user", "content": "p"}
 
 
-def test_generate_structured_raises_after_the_retry():
-    module = _client_class()
-    scripted = type("C", (_ScriptedClient, module.LLMClient), {})(["not json", "still not json"])
+def test_generate_structured_raises_when_instructor_exhausts_its_retries():
+    from instructor.core import InstructorRetryException
 
-    with pytest.raises(module.StructuredOutputError):
-        run(scripted.generate_structured("p", ReplyIntentLLMOutput))
-
-    assert len(scripted.prompts) == 2
-
-
-def test_generate_structured_rejects_an_intent_outside_the_taxonomy():
-    module = _client_class()
-    scripted = type("C", (_ScriptedClient, module.LLMClient), {})(
-        ['{"intent": "MAYBE_PAY", "confidence": 0.9}'] * 2
+    module, client = _client_with(
+        error=InstructorRetryException(
+            "validation failed", n_attempts=2, total_usage=0, last_completion=None
+        )
     )
 
     with pytest.raises(module.StructuredOutputError):
-        run(scripted.generate_structured("p", ReplyIntentLLMOutput))
+        run(client.generate_structured("p", ReplyIntentLLMOutput))
+
+
+def test_generate_structured_raises_on_a_transport_failure():
+    """A provider outage degrades the same way a malformed response does."""
+
+    module, client = _client_with(error=ConnectionError("groq unreachable"))
+
+    with pytest.raises(module.StructuredOutputError):
+        run(client.generate_structured("p", ReplyIntentLLMOutput))
+
+
+def test_generate_structured_raises_when_the_provider_is_unconfigured():
+    module = _client_module()
+
+    class _Unconfigured(module.LLMClient):
+        async def generate(self, prompt, system_prompt=None):
+            return ""
+
+        def is_available(self):
+            return False
+
+    with pytest.raises(module.StructuredOutputError):
+        run(_Unconfigured().generate_structured("p", ReplyIntentLLMOutput))
+
+
+def test_unstructured_path_does_not_go_through_instructor():
+    """instructor is scoped to schema-bound calls and must stay that way."""
+
+    _, client = _client_with(result=ReplyIntentLLMOutput(intent=IntentLabel.OTHER, confidence=0.5))
+
+    assert run(client.generate_explanation("draft a reminder")) == "unstructured text"
+    assert client.structured.calls == []
+
+
+def test_classifier_degrades_to_other_when_instructor_gives_up():
+    """The end-to-end contract: a failed structured call is never an exception.
+
+    This is the behaviour that survived the instructor migration unchanged, and
+    the reason it is asserted here rather than assumed.
+    """
+
+    module, client = _client_with(error=ConnectionError("provider down"))
+
+    prediction = run(
+        classify_reply_llm(
+            "I will pay on Friday",
+            {"invoice_id": "INV-1"},
+            reply_id="R-1",
+            client=client,
+        )
+    )
+
+    assert prediction.intent is IntentLabel.OTHER
+    assert prediction.fallback_used is True
+    assert prediction.fallback.reason is FallbackReason.MALFORMED_OUTPUT
+    assert isinstance(prediction, ReplyIntentPrediction)
 
 
 # ---------------------------------------------------------------------------
