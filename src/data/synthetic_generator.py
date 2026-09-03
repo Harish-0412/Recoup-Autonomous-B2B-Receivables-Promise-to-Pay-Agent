@@ -317,9 +317,25 @@ class SyntheticBatch(BaseModel):
     generator_version: str
     horizon_days: int
     as_of: date
+    timeline_days: int = 3
     customers: list[Customer]
     invoices: list[Invoice]
     reply_seed_examples: list[ReplySeedExample]
+
+    def mature_invoices(self) -> list[Invoice]:
+        """Invoices whose horizon has fully elapsed by ``as_of``.
+
+        An invoice flagged ten days ago has no observed 30-day outcome yet.
+        Training on one would teach the model that recent invoices are not
+        recovered, which is an artefact of when the data was cut, not
+        behaviour. Only mature rows carry a real label.
+        """
+
+        return [
+            invoice
+            for invoice in self.invoices
+            if (self.as_of - invoice.flagged_date).days >= self.horizon_days
+        ]
 
     def archetype_counts(self) -> dict[str, int]:
         """Aggregate archetype distribution -- manifest metadata, not a feature."""
@@ -462,8 +478,17 @@ def generate_invoices(
     *,
     batch_size: int,
     as_of: date,
+    timeline_days: int = 3,
 ) -> list[Invoice]:
-    """Generate ``batch_size`` overdue invoices spread across ``customers``."""
+    """Generate ``batch_size`` overdue invoices spread across ``customers``.
+
+    ``timeline_days`` is how far back from ``as_of`` invoices may have been
+    flagged. The default of 3 keeps a batch effectively "as of today", which is
+    what the demo wants. Recovery-model training passes a long window instead,
+    because a model that will predict forward has to be validated on a split by
+    time rather than at random -- otherwise it is scored on a future it was
+    partly trained on.
+    """
 
     if not customers:
         raise ValueError("customers must not be empty")
@@ -488,7 +513,7 @@ def generate_invoices(
 
         terms = int(PAYMENT_TERMS_DAYS[int(rng.integers(len(PAYMENT_TERMS_DAYS)))])
         days_overdue = int(_clamp(float(rng.gamma(shape=2.2, scale=7.0)) + 1.0, 1.0, 120.0))
-        flagged_date = as_of - timedelta(days=int(rng.integers(0, 4)))
+        flagged_date = as_of - timedelta(days=int(rng.integers(0, timeline_days + 1)))
         due_date = flagged_date - timedelta(days=days_overdue)
         issue_date = due_date - timedelta(days=terms)
 
@@ -1069,6 +1094,7 @@ def generate_batch(
     seed: int = 42,
     horizon_days: int = 30,
     as_of: date | None = None,
+    timeline_days: int = 3,
 ) -> SyntheticBatch:
     """Generate a complete, reproducible batch: customers, invoices, outcomes, replies.
 
@@ -1081,7 +1107,13 @@ def generate_batch(
     resolved_customers = customer_count or max(20, batch_size // 4)
 
     customers = generate_customers(resolved_customers, rng)
-    invoices = generate_invoices(customers, rng, batch_size=batch_size, as_of=resolved_as_of)
+    invoices = generate_invoices(
+        customers,
+        rng,
+        batch_size=batch_size,
+        as_of=resolved_as_of,
+        timeline_days=timeline_days,
+    )
     simulate_outcomes(invoices, customers, rng, horizon_days=horizon_days)
     replies = generate_reply_seed_examples(
         rng,
@@ -1094,6 +1126,7 @@ def generate_batch(
         generator_version=GENERATOR_VERSION,
         horizon_days=horizon_days,
         as_of=resolved_as_of,
+        timeline_days=timeline_days,
         customers=customers,
         invoices=invoices,
         reply_seed_examples=replies,

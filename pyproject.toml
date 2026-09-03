@@ -9,34 +9,19 @@ dependencies = [
     "uvicorn[standard]==0.32.0",
     "sqlalchemy==2.0.36",
     "alembic==1.14.1",
-    "psycopg[binary,pool]==3.2.3",
+    "asyncpg==0.29.0",
     "pydantic==2.10.3",
     "pydantic-settings==2.6.1",
     "python-dotenv==1.0.1",
     "httpx==0.28.1",
-    "razorpay==2.0.1",
+    "razorpay==1.4.1",
     "resend==2.42.0",
-    "groq==1.7.0",
+    "groq==0.6.0",
     "google-generativeai==0.8.3",
     "python-multipart==0.0.12",
     "email-validator==2.2.0",
     "python-json-logger==2.0.7",
     "structlog==24.4.0",
-    # --- agent loop ---
-    # instructor: validated, retry-on-failure structured LLM output.
-    # transitions: the escalation ladder FSM, with guards enforced by the library.
-    # business-rules: policy rules defined as data rather than nested ifs.
-    "instructor>=1.16",
-    "transitions>=0.9",
-    "business-rules>=1.1",
-    # --- ML ---
-    "scikit-learn>=1.4",
-    "xgboost>=2.0",
-    "shap>=0.45",
-    "pandas>=2.2",
-    "numpy>=1.26",
-    "joblib>=1.3",
-    "dateparser>=1.2",
 ]
 
 [project.optional-dependencies]
@@ -46,24 +31,16 @@ dev = [
     "pytest-cov==5.0.0",
     "ruff==0.7.1",
     "mypy==1.13.0",
-    ]
+    "types-requests==2.32.3",
+]
 
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
-# Both roots are packaged explicitly. Without this, setuptools auto-discovery
-# reads src/ as a src-layout root and installs "ml" and "data" as top-level
-# packages, which does not match how this project imports them.
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["app*", "src*"]
-
 [tool.ruff]
 target-version = "py311"
 line-length = 100
-
-[tool.ruff.lint]
 select = [
     "E",   # pycodestyle errors
     "W",   # pycodestyle warnings
@@ -79,7 +56,7 @@ fixable = ["ALL"]
 unfixable = []
 
 [tool.ruff.lint.isort]
-known-first-party = ["app", "src"]
+known-first-party = ["app"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -96,26 +73,8 @@ module = [
     "sqlalchemy.*",
     "pydantic.*",
     "fastapi.*",
-    # Third-party SDKs that ship no type stubs or py.typed marker.
-    "razorpay.*",
-    "google.*",
-    "google.generativeai.*",
-    "resend.*",
-    "groq.*",
-    "transitions.*",
-    "business_rules.*",
-    "instructor.*",
 ]
 ignore_missing_imports = true
-
-# numpy's bundled stubs use PEP 695 `type` statements, which mypy only parses
-# when targeting 3.12+. This project targets 3.11, and instructor pulls numpy
-# into the type-check graph, so skip analysing those stubs rather than lowering
-# the target for the whole codebase.
-[[tool.mypy.overrides]]
-module = ["numpy.*"]
-follow_imports = "skip"
-follow_imports_for_stubs = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -126,7 +85,7 @@ python_functions = ["test_*"]
 addopts = "-v --tb=short"
 
 [tool.coverage.run]
-source = ["app", "src"]
+source = ["app"]
 omit = ["*/tests/*", "*/migrations/*"]
 
 [tool.coverage.report]

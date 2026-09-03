@@ -34,6 +34,12 @@ class MLSettings(BaseSettings):
         validation_alias="RECOVERY_HORIZON_DAYS",
     )
 
+    #: Which recovery scorer the agent uses. False keeps the hand-written
+    #: rules-based scorer in charge; True switches to the trained model, which
+    #: still falls back to the rules per-invoice on any failure. Defaults to
+    #: False so a fresh clone with no trained artifact behaves predictably.
+    use_model_scorer: bool = Field(default=False, validation_alias="USE_MODEL_SCORER")
+
     def ensure_artifacts_dir(self) -> Path:
         """Create and return the configured artifact directory."""
 
