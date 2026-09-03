@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.agent import AgentConfig, run_cycle
 from app.core.audit import DecisionLedger, DecisionTraceEntry, append_decision_trace
+from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.policy import policy_config_from_settings
 from app.db.session import get_db
@@ -223,7 +224,27 @@ async def trigger_cycle(invoice_id: str, db: AsyncSession = Depends(get_db)) -> 
     # not something the customer is emailed about. ExecutionIntent refuses them
     # outright, so the filter belongs here rather than being discovered there.
     execution = None
+    halted = not get_settings().SENDING_ENABLED
     if (
+        result.acted
+        and result.action is not None
+        and result.decision is not None
+        and result.action.is_contact
+        and halted
+    ):
+        # The kill switch, honoured here as well as in the batch runner: a
+        # switch that only stops the scheduled path is not a kill switch.
+        # Nothing sent and nothing advanced, so flipping it back on resumes
+        # where the agent left off.
+        append_decision_trace(
+            invoice_id=invoice.invoice_id,
+            event="execution:halted",
+            outcome=DecisionOutcome.SKIPPED,
+            reason="SENDING_ENABLED is false; outbound contact is halted.",
+            ledger=ledger,
+            ladder_step=result.ladder_step,
+        )
+    elif (
         result.acted
         and result.action is not None
         and result.decision is not None
@@ -252,7 +273,7 @@ async def trigger_cycle(invoice_id: str, db: AsyncSession = Depends(get_db)) -> 
     # A transition that produced no delivered message must not move the case.
     # Burning a rung on a failed send walks an invoice to final notice without
     # the customer ever hearing from us; the next cycle should retry this rung.
-    advanced = result.transitioned and (execution is None or execution.delivered)
+    advanced = result.transitioned and not halted and (execution is None or execution.delivered)
     if advanced:
         invoice.escalation_state = result.state_after
         invoice.ladder_index += 1

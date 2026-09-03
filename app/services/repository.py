@@ -402,3 +402,23 @@ async def replies_needing_review(session: AsyncSession, *, limit: int = 100) -> 
         .limit(limit)
     )
     return list(result.scalars().all())
+
+
+async def pending_promises(
+    session: AsyncSession, *, limit: int = 500
+) -> list[tuple[Promise, Invoice]]:
+    """Every still-open promise with its invoice, oldest promised date first.
+
+    Joined rather than fetched separately because the sweep needs
+    ``invoice.amount_paid`` for each one, and a promise is only ever settled by
+    money that actually arrived.
+    """
+
+    result = await session.execute(
+        select(Promise, Invoice)
+        .join(Invoice, Invoice.id == Promise.invoice_pk)
+        .where(Promise.status == PromiseStatus.PENDING)
+        .order_by(Promise.promised_date)
+        .limit(limit)
+    )
+    return list(result.all())  # type: ignore[arg-type]

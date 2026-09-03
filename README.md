@@ -380,6 +380,7 @@ Use this table as a running checklist while building — update it honestly as p
 | Action executor | ☑ Done — sends via Resend + Razorpay links; `DRY_RUN` by default |
 | Prioritization scorer | ☑ Done — rules-based; declares `fallback_used=True` |
 | Reply ingestion (Promise-to-Pay) | ☑ Done — `POST /api/v1/replies`, signed reply-to routing, human review queue |
+| Autonomous batch runs | ☑ Done — `POST /api/v1/tasks/run-batch`, advisory-locked, kill switch |
 | Recovery-probability model | ☑ Done — `xgb-recovery`, calibrated; AUC 0.779 vs 0.732 rules ([model card](docs/recovery_model_card.md)) |
 | Policy / gate engine | ☑ Done — `business-rules`; rules compiled from config |
 | Escalation state machine | ☑ Done — `transitions`; `auto_transitions=False` |

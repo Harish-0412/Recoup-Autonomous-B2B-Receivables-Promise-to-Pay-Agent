@@ -171,11 +171,39 @@ class Settings(BaseSettings):
         ge=0,
     )
 
-    # Scheduler
+    # Autonomous batch runs
+    #: How often the external cron is expected to call
+    #: ``POST /api/v1/tasks/run-batch``. Recorded here so the run summary can
+    #: say what cadence it believes it is on; nothing in-process reads it as a
+    #: timer. An in-process scheduler double-fires the moment a second replica
+    #: starts, so the schedule lives outside the app and the app defends itself
+    #: with an advisory lock instead.
     SCHEDULER_INTERVAL_SECONDS: int = Field(
         default=300,
-        description="Interval in seconds for background scheduler",
+        description="Expected interval between external cron triggers",
         ge=60,
+    )
+    #: Shared secret for the task endpoints. They send real email, so they are
+    #: authenticated even though the rest of the API is not yet -- an open
+    #: run-batch endpoint is an open endpoint that mails your customers.
+    TASK_API_KEY: str = Field(
+        default="",
+        description="Bearer token the cron trigger must present",
+    )
+    #: Most invoices one triggered run may touch. A cron that fires while the
+    #: previous run is still going should find a bounded amount of work, not a
+    #: whole book.
+    BATCH_MAX_INVOICES: int = Field(default=200, gt=0)
+
+    #: The kill switch. Set to false and every outbound message stops, with no
+    #: redeploy and no code change. Deliberately separate from ``DRY_RUN``:
+    #: dry run is a *development* mode that still exercises the caps and the
+    #: ladder, whereas this is an operational stop that advances nothing -- so
+    #: turning it back on resumes where the agent left off rather than finding
+    #: every invoice a rung further along.
+    SENDING_ENABLED: bool = Field(
+        default=True,
+        description="Master switch for all outbound contact",
     )
 
     @property

@@ -20,6 +20,7 @@ from app.api.invoices import router as invoices_router
 from app.api.policy import router as policy_router
 from app.api.replies import router as replies_router
 from app.api.reports import router as reports_router
+from app.api.tasks import router as tasks_router
 from app.api.webhooks import router as webhooks_router
 from app.core.config import get_settings
 from app.core.logging import get_logger, setup_logging
@@ -93,6 +94,7 @@ app.include_router(webhooks_router, prefix="/api/v1")
 app.include_router(reports_router, prefix="/api/v1")
 app.include_router(policy_router, prefix="/api/v1")
 app.include_router(replies_router, prefix="/api/v1")
+app.include_router(tasks_router, prefix="/api/v1")
 
 
 @app.get("/")
