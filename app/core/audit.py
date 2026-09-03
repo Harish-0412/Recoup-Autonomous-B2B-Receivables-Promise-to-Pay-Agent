@@ -25,7 +25,7 @@ import hashlib
 import json
 import threading
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -57,21 +57,46 @@ class DecisionTraceEntry(BaseModel):
     def content_digest(self) -> str:
         """Hash this entry's content together with its predecessor's hash.
 
-        ``sort_keys`` and ``default=str`` make the serialisation canonical:
-        the same entry always produces the same digest regardless of dict
-        ordering or how a datetime happens to be rendered.
+        **The digest commits to content; the chain commits to order.** Those
+        are deliberately separate, and conflating them is what made this ledger
+        accuse itself of tampering. ``seq`` is a *position*, and the
+        persistence layer legitimately rewrites it: an in-memory ledger numbers
+        its entries from zero, while ``decision_traces.seq`` is a global
+        monotonic position, so ``persist_ledger`` stores ``offset + seq``.
+        Hashing the position meant every stored row re-derived to a different
+        digest than the one beside it, and ``chain_verified`` was false for a
+        ledger nobody had touched. Ordering is still committed to, by
+        ``prev_hash`` -- reordering or deleting an entry breaks the chain
+        exactly as before.
+
+        The timestamp needs its own normalisation for a related reason. An
+        entry is written with a UTC-aware ``recorded_at``, but Postgres returns
+        ``timestamptz`` in the *session's* timezone; on a server set to
+        Asia/Kolkata the same instant reads back as ``+05:30``, whose
+        ``isoformat()`` differs from the ``+00:00`` that was hashed. Converting
+        to UTC makes the digest a function of the instant, not of the reader's
+        timezone.
+
+        ``sort_keys`` and ``default=str`` handle the rest: the same content
+        serialises identically regardless of dict ordering.
         """
+
+        recorded_at = self.recorded_at
+        if recorded_at.tzinfo is None:
+            # A naive datetime is treated as UTC rather than as local time:
+            # everything that writes here uses utc_now(), and guessing local
+            # would reintroduce exactly the ambiguity above.
+            recorded_at = recorded_at.replace(tzinfo=UTC)
 
         material = json.dumps(
             {
-                "seq": self.seq,
                 "invoice_id": self.invoice_id,
                 "event": self.event,
                 "outcome": self.outcome.value,
                 "reason": self.reason,
                 "actor": self.actor,
                 "payload": self.payload,
-                "recorded_at": self.recorded_at.isoformat(),
+                "recorded_at": recorded_at.astimezone(UTC).isoformat(),
                 "prev_hash": self.prev_hash,
             },
             sort_keys=True,

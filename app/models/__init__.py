@@ -10,6 +10,7 @@ a circular import.
 from app.models.enums import (
     ContactChannel,
     DecisionOutcome,
+    DeliveryStatus,
     EscalationState,
     InterventionTier,
     InvoiceStatus,
@@ -30,6 +31,7 @@ __all__ = [
     "ContactLog",
     "Customer",
     "DecisionOutcome",
+    "DeliveryStatus",
     "DecisionTrace",
     "EscalationState",
     "InterventionTier",

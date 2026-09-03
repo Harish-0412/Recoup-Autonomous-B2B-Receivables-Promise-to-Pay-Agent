@@ -9,6 +9,7 @@ from app.schemas.invoices import (
     BatchIngestResponse,
     CustomerIn,
     DecisionTraceOut,
+    ExecutionOut,
     InvoiceIn,
     InvoiceOut,
     PolicyDecisionOut,
@@ -26,5 +27,6 @@ __all__ = [
     "InvoiceOut",
     "PolicyDecisionOut",
     "PromiseOut",
+    "ExecutionOut",
     "RunCycleResponse",
 ]

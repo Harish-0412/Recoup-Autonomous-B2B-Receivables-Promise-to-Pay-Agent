@@ -376,6 +376,7 @@ Use this table as a running checklist while building — update it honestly as p
 | Synthetic dataset generator | ☑ Done — `src/data/synthetic_generator.py`, seeded and tested |
 | ML prediction schemas & contracts | ☑ Done — `src/ml/schemas/` |
 | Reply understanding (LLM baseline) | ☑ Done — `instructor`-backed, degrades to `OTHER` |
+| Action executor | ☑ Done — sends via Resend + Razorpay links; `DRY_RUN` by default |
 | Prioritization scorer | ☑ Done — rules-based; declares `fallback_used=True` |
 | Recovery-probability model | ☑ Done — `xgb-recovery`, calibrated; AUC 0.779 vs 0.732 rules ([model card](docs/recovery_model_card.md)) |
 | Policy / gate engine | ☑ Done — `business-rules`; rules compiled from config |
@@ -395,9 +396,11 @@ Use this table as a running checklist while building — update it honestly as p
 
 **Known gaps, stated plainly:**
 
-- The action executor is not wired. The agent decides, gates and records
-  correctly, and the Razorpay/Resend clients work, but nothing calls them from
-  `run_cycle` yet — no real payment link is created and no email is sent.
+- The action executor is wired, but **`DRY_RUN` defaults to true**, so out of
+  the box every message is fully rendered and logged rather than delivered.
+  Those contacts are recorded as `SIMULATED`, which still consumes the contact
+  caps so a dry run behaves like a live one. Set `DRY_RUN=false` with real
+  Razorpay test-mode and Resend keys to actually send.
 - The recovery model is trained but **off by default**. Set `USE_MODEL_SCORER=true`
   (or pass `--use-model` to the batch demo) to score with it; the rules stay the
   default so a fresh clone with no trained artifact behaves predictably. Either

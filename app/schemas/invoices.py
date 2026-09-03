@@ -166,6 +166,29 @@ class PolicyDecisionOut(BaseModel):
     effective_discount_amount: float = 0.0
 
 
+class ExecutionOut(BaseModel):
+    """What the executor actually did, if it ran.
+
+    Present only when the gate approved a contact. ``status`` distinguishes a
+    delivered message from a simulated one from a failure, so a caller can
+    never read "we contacted them" out of a run where nothing was sent.
+    """
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    status: str
+    delivered: bool
+    dry_run: bool
+    subject: str = ""
+    body_preview: str = ""
+    provider_message_id: str | None = None
+    payment_link_id: str | None = None
+    payment_link_url: str | None = None
+    payment_link_reused: bool = False
+    amount_requested: float = 0.0
+    error: str | None = None
+
+
 class RunCycleResponse(BaseModel):
     """The full, explainable result of one decision cycle."""
 
@@ -188,7 +211,11 @@ class RunCycleResponse(BaseModel):
     state_after: EscalationState
     reason: str = ""
     terminal: bool = False
-    #: Set when the scorer ran without a trained model, which is the case for
-    #: every response until Phase 4 lands. Surfaced rather than hidden.
+    #: Set when the scorer ran without a trained model. Surfaced, never hidden.
     scorer_fallback: bool = True
     scorer_version: str = ""
+
+    #: Present only when the gate approved a contact and the executor ran.
+    #: ``None`` means nothing was sent, and says so rather than leaving the
+    #: caller to infer it from the tier.
+    execution: ExecutionOut | None = None

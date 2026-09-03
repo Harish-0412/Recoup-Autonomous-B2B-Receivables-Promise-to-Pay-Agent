@@ -25,6 +25,7 @@ from app.models import (
     ContactLog,
     Customer,
     DecisionTrace,
+    DeliveryStatus,
     Invoice,
     InvoiceStatus,
     OptOut,
@@ -147,11 +148,25 @@ async def load_case(
     )
 
 
+#: Attempts that actually reached a customer. A FAILED row is a record of an
+#: outage, not of a contact, and must not consume the contact budget.
+COUNTED_DELIVERIES = (DeliveryStatus.SENT, DeliveryStatus.SIMULATED)
+
+
 async def contacts_sent_count(session: AsyncSession, invoice_pk: int) -> int:
-    """How many messages have gone out about this invoice."""
+    """How many messages have actually gone out about this invoice.
+
+    Excludes FAILED attempts. Counting them would let a provider outage burn
+    through the per-invoice cap without a single email being delivered.
+    """
 
     result = await session.execute(
-        select(func.count()).select_from(ContactLog).where(ContactLog.invoice_pk == invoice_pk)
+        select(func.count())
+        .select_from(ContactLog)
+        .where(
+            ContactLog.invoice_pk == invoice_pk,
+            ContactLog.status.in_(COUNTED_DELIVERIES),
+        )
     )
     return int(result.scalar_one())
 
@@ -164,29 +179,43 @@ async def record_contact(
     ladder_step: str,
     subject: str = "",
     body_preview: str = "",
+    status: DeliveryStatus = DeliveryStatus.SENT,
     provider_message_id: str | None = None,
+    payment_link_id: str | None = None,
+    provider_error: str | None = None,
 ) -> ContactLog:
-    """Log an outbound message and update the invoice's contact counters.
+    """Record one delivery *attempt*, and update counters only if it landed.
 
-    Both happen together deliberately: the frequency cap counts ``ContactLog``
-    rows and the gap rule reads ``last_contact_at``, so a send recorded in one
-    place but not the other would quietly widen a cap.
+    A row is written either way, because a failed send is worth seeing. The
+    counters are the part that must not move: ``prior_reminders_sent`` and
+    ``last_contact_at`` drive the frequency cap and the minimum-gap rule, so
+    incrementing them for a message that never left would spend a customer's
+    contact budget on nothing -- and a provider outage would silently exhaust
+    the whole book while sending zero emails.
+
+    Counters and the row are still written in one unit of work for a delivered
+    message: the cap counts rows and the gap rule reads ``last_contact_at``, so
+    a send recorded in one place but not the other would widen a cap.
     """
 
     contact = ContactLog(
         invoice_pk=invoice.id,
         channel=channel,
         ladder_step=ladder_step,
-        subject=subject,
+        subject=subject[:255],
         body_preview=body_preview[:500],
+        status=status,
         provider_message_id=provider_message_id,
+        payment_link_id=payment_link_id,
+        provider_error=provider_error,
     )
     session.add(contact)
 
-    invoice.prior_reminders_sent += 1
-    invoice.last_contact_at = utc_now()
-    if invoice.status is InvoiceStatus.OPEN:
-        invoice.status = InvoiceStatus.IN_PROGRESS
+    if contact.counts_as_contact:
+        invoice.prior_reminders_sent += 1
+        invoice.last_contact_at = utc_now()
+        if invoice.status is InvoiceStatus.OPEN:
+            invoice.status = InvoiceStatus.IN_PROGRESS
 
     return contact
 
@@ -227,9 +256,14 @@ async def record_opt_out(
 async def persist_ledger(session: AsyncSession, ledger: DecisionLedger) -> int:
     """Mirror an in-memory ledger's entries into ``decision_traces``.
 
-    The hash chain is computed in the core and stored as-is; this function does
-    not recompute it. ``seq`` continues from what is already persisted so the
-    chain stays dense across process restarts.
+    The hashes are computed in the core and stored as-is; this function never
+    recomputes them. ``seq`` is re-based so the stored column stays a dense
+    global position across process restarts, while each ledger numbers its own
+    entries from zero.
+
+    That renumbering is safe precisely because ``content_digest`` does not
+    cover ``seq`` -- see the note there. It used to, which meant this line
+    silently invalidated every hash it wrote.
     """
 
     result = await session.execute(select(func.coalesce(func.max(DecisionTrace.seq), -1)))

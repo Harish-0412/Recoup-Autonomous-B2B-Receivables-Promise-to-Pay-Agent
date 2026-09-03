@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from app.core.audit import (
     GENESIS_HASH,
     DecisionLedger,
+    DecisionTraceEntry,
     LedgerIntegrityError,
     append_decision_trace,
     get_ledger,
@@ -168,3 +169,93 @@ def test_the_digest_is_stable_across_dict_ordering(ledger):
     reordered = first.model_copy(update={"payload": {"a": 1, "b": 2}})
 
     assert reordered.content_digest() == first.entry_hash
+
+
+class TestDigestSurvivesPersistence:
+    """Two ways the ledger used to accuse itself of tampering.
+
+    Both were found by reading a trace back out of Postgres rather than out of
+    memory, and both made ``chain_verified`` false for a ledger nobody had
+    touched -- which is worse than no integrity check, because it trains people
+    to ignore the one signal that is supposed to mean something.
+    """
+
+    def test_renumbering_seq_does_not_invalidate_the_hash(self):
+        """``persist_ledger`` re-bases seq onto a global position.
+
+        The digest must therefore not cover seq. Ordering is still committed
+        to by prev_hash, which the chain test below exercises.
+        """
+
+        ledger = DecisionLedger()
+        entry = ledger.append(invoice_id="INV-1", event="scored", outcome=DecisionOutcome.APPROVED)
+
+        renumbered = entry.model_copy(update={"seq": entry.seq + 500})
+
+        assert renumbered.content_digest() == entry.entry_hash
+
+    def test_reordering_is_still_detected(self):
+        """Dropping seq from the digest must not weaken tamper evidence."""
+
+        ledger = DecisionLedger()
+        for index in range(3):
+            ledger.append(invoice_id="INV-1", event=f"e{index}", outcome=DecisionOutcome.APPROVED)
+        assert ledger.is_valid()
+
+        # Break the chain the way a reorder or deletion would.
+        entries = list(ledger.entries())
+        ledger._entries = [entries[0], entries[2]]  # noqa: SLF001
+
+        assert ledger.is_valid() is False
+
+    def test_editing_content_is_still_detected(self):
+        ledger = DecisionLedger()
+        entry = ledger.append(
+            invoice_id="INV-1",
+            event="scored",
+            outcome=DecisionOutcome.APPROVED,
+            reason="original",
+        )
+
+        tampered = entry.model_copy(update={"reason": "edited"})
+
+        assert tampered.content_digest() != entry.entry_hash
+
+    def test_the_digest_is_the_same_instant_in_any_timezone(self):
+        """Postgres returns timestamptz in the session timezone.
+
+        The same instant read back as +05:30 must hash identically to the
+        +00:00 it was written as, or every row on a non-UTC server 'fails'.
+        """
+
+        from datetime import UTC, datetime, timedelta, timezone
+
+        written_at = datetime(2026, 9, 3, 8, 30, tzinfo=UTC)
+        read_back_at = written_at.astimezone(timezone(timedelta(hours=5, minutes=30)))
+        assert written_at == read_back_at
+        assert written_at.isoformat() != read_back_at.isoformat()
+
+        base = {
+            "seq": 0,
+            "invoice_id": "INV-1",
+            "event": "scored",
+            "outcome": DecisionOutcome.APPROVED,
+        }
+        written = DecisionTraceEntry(**base, recorded_at=written_at)
+        read_back = DecisionTraceEntry(**base, recorded_at=read_back_at)
+
+        assert written.content_digest() == read_back.content_digest()
+
+    def test_a_naive_timestamp_is_read_as_utc(self):
+        from datetime import UTC, datetime
+
+        base = {
+            "seq": 0,
+            "invoice_id": "INV-1",
+            "event": "scored",
+            "outcome": DecisionOutcome.APPROVED,
+        }
+        aware = DecisionTraceEntry(**base, recorded_at=datetime(2026, 9, 3, 8, 30, tzinfo=UTC))
+        naive = DecisionTraceEntry(**base, recorded_at=datetime(2026, 9, 3, 8, 30))
+
+        assert aware.content_digest() == naive.content_digest()

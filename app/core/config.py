@@ -55,6 +55,21 @@ class Settings(BaseSettings):
     DB_POOL_SIZE: int = Field(default=5, ge=1)
     DB_MAX_OVERFLOW: int = Field(default=10, ge=0)
 
+    # Execution
+    #: When true the executor renders every message in full and logs it instead
+    #: of delivering it. No email leaves, no payment link is created, and the
+    #: contact is recorded as SIMULATED so the run still exercises the caps and
+    #: the ladder exactly as a live run would.
+    #:
+    #: Defaults to True, and that default is the safety property: a deployment
+    #: that has not deliberately said "yes, send real email to real customers"
+    #: must not send real email to real customers. Turning it off is a decision
+    #: someone makes on purpose.
+    DRY_RUN: bool = Field(
+        default=True,
+        description="Render and log messages instead of delivering them",
+    )
+
     # Razorpay (Test Mode)
     RAZORPAY_KEY_ID: str = Field(
         default="rzp_test_xxxxxxxxxxxxxxxx",

@@ -6,22 +6,24 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.agent import AgentConfig, run_cycle
-from app.core.audit import DecisionLedger, DecisionTraceEntry
+from app.core.audit import DecisionLedger, DecisionTraceEntry, append_decision_trace
 from app.core.logging import get_logger
 from app.core.policy import policy_config_from_settings
 from app.db.session import get_db
-from app.models import Customer, Invoice
+from app.models import Customer, DecisionOutcome, DeliveryStatus, Invoice
 from app.schemas import (
     AuditTrailOut,
     BatchIngestRequest,
     BatchIngestResponse,
     DecisionTraceOut,
+    ExecutionOut,
     InvoiceOut,
     PolicyDecisionOut,
     PromiseOut,
     RunCycleResponse,
 )
 from app.services import repository
+from app.services.executor import ExecutionIntent, build_execution_service
 from src.ml.versioning import utc_now
 
 router = APIRouter(prefix="/invoices", tags=["invoices"])
@@ -184,12 +186,20 @@ async def get_audit_trail(invoice_id: str, db: AsyncSession = Depends(get_db)) -
 
 @router.post("/{invoice_id}/run-cycle", response_model=RunCycleResponse)
 async def trigger_cycle(invoice_id: str, db: AsyncSession = Depends(get_db)) -> RunCycleResponse:
-    """Run one decision cycle over this invoice and persist what happened.
+    """Run one decision cycle over this invoice, and act on it.
 
     Everything the agent decided is returned, including the cases where it
-    decided to do nothing and why. This endpoint is the demo's centrepiece:
-    it is the one place a judge can watch a single invoice go through score ->
-    propose -> gate -> transition and read the reason at each step.
+    decided to do nothing and why. This endpoint is the demo's centrepiece: it
+    is the one place a judge can watch a single invoice go through
+    score -> propose -> gate -> transition -> execute and read the reason at
+    each step.
+
+    The ``execute`` step is the one with a failure mode worth stating. A
+    delivered message advances the ladder and consumes a contact slot; a failed
+    one advances nothing, so the next cycle retries the same rung rather than
+    marching the invoice toward final notice on the strength of emails that
+    never arrived. ``execution`` in the response says which happened, and
+    whether anything was really sent or only simulated under ``DRY_RUN``.
     """
 
     invoice = await _load_invoice_or_404(db, invoice_id)
@@ -202,18 +212,50 @@ async def trigger_cycle(invoice_id: str, db: AsyncSession = Depends(get_db)) -> 
         ledger=ledger,
     )
 
-    if result.transitioned:
+    # --- execute ---------------------------------------------------------
+    #
+    # The ordering below is the whole point of this endpoint's rewrite. It used
+    # to advance the ladder and write a ContactLog row unconditionally, for a
+    # message nothing had sent. Now: send first, and only a delivered message
+    # buys a rung.
+    # Only a *contacting* action executes. HAND_OFF and CLOSE are approved
+    # actions too, but they move internal state -- handing a case to a human is
+    # not something the customer is emailed about. ExecutionIntent refuses them
+    # outright, so the filter belongs here rather than being discovered there.
+    execution = None
+    if (
+        result.acted
+        and result.action is not None
+        and result.decision is not None
+        and result.action.is_contact
+    ):
+        intent = ExecutionIntent.from_decision(case, result.action, result.decision)
+        executor = build_execution_service()
+        execution = await executor.execute(db, intent, invoice)
+
+        append_decision_trace(
+            invoice_id=invoice.invoice_id,
+            event="executed",
+            outcome=(DecisionOutcome.EXECUTED if execution.delivered else DecisionOutcome.FAILED),
+            reason=(
+                f"{execution.status.value} via {execution.channel.value}"
+                if execution.delivered
+                else f"delivery failed: {execution.error}"
+            ),
+            ledger=ledger,
+            ladder_step=execution.ladder_step,
+            provider_message_id=execution.provider_message_id,
+            payment_link_id=execution.payment_link_id,
+            amount_requested=execution.amount_requested,
+        )
+
+    # A transition that produced no delivered message must not move the case.
+    # Burning a rung on a failed send walks an invoice to final notice without
+    # the customer ever hearing from us; the next cycle should retry this rung.
+    advanced = result.transitioned and (execution is None or execution.delivered)
+    if advanced:
         invoice.escalation_state = result.state_after
         invoice.ladder_index += 1
-        if result.acted:
-            await repository.record_contact(
-                db,
-                invoice,
-                channel=case.customer.preferred_channel,
-                ladder_step=result.ladder_step,
-                subject=f"Invoice {invoice.invoice_id}: {result.ladder_step}",
-                body_preview=result.reason,
-            )
 
     await repository.persist_ledger(db, ledger)
     await db.commit()
@@ -243,11 +285,30 @@ async def trigger_cycle(invoice_id: str, db: AsyncSession = Depends(get_db)) -> 
         action_type=result.action.action_type.value if result.action else None,
         ladder_step=result.ladder_step,
         decision=decision,
-        transitioned=result.transitioned,
+        # Reports what the *database* now says, not what the FSM proposed: a
+        # failed send leaves the case where it was.
+        transitioned=advanced,
         state_before=result.state_before,
-        state_after=result.state_after,
+        state_after=(result.state_after if advanced else result.state_before),
         reason=result.reason,
         terminal=result.terminal,
         scorer_fallback=result.score.prediction.fallback_used,
         scorer_version=result.score.prediction.model_version,
+        execution=(
+            ExecutionOut(
+                status=execution.status.value,
+                delivered=execution.delivered,
+                dry_run=execution.status is DeliveryStatus.SIMULATED,
+                subject=execution.subject,
+                body_preview=execution.body_preview,
+                provider_message_id=execution.provider_message_id,
+                payment_link_id=execution.payment_link_id,
+                payment_link_url=execution.payment_link_url,
+                payment_link_reused=execution.payment_link_reused,
+                amount_requested=execution.amount_requested,
+                error=execution.error,
+            )
+            if execution is not None
+            else None
+        ),
     )

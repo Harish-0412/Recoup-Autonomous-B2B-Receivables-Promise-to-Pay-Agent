@@ -37,6 +37,7 @@ from app.db.session import Base
 from app.models.enums import (
     ContactChannel,
     DecisionOutcome,
+    DeliveryStatus,
     EscalationState,
     InvoiceStatus,
     PromiseStatus,
@@ -167,11 +168,18 @@ class Promise(Base):
 
 
 class ContactLog(Base):
-    """Every outbound message the agent actually sent.
+    """Every outbound message the agent attempted, and what became of it.
 
     The contact-frequency cap is enforced by counting rows here, so a message
     that was sent but not logged would silently widen the cap. Executors write
     this row in the same unit of work as the send.
+
+    ``status`` is the column that makes this table honest. A row is written for
+    every *attempt*, and only ``SENT`` or ``SIMULATED`` rows are counted as
+    contact -- see :func:`app.services.repository.contacts_sent_count`. Before
+    this existed, a row was written whether or not anything left the building,
+    which meant the caps were being enforced against messages that did not
+    exist.
     """
 
     __tablename__ = "contact_logs"
@@ -182,8 +190,27 @@ class ContactLog(Base):
     ladder_step: Mapped[str] = mapped_column(String(64))
     subject: Mapped[str] = mapped_column(String(255), default="")
     body_preview: Mapped[str] = mapped_column(Text, default="")
+
+    status: Mapped[DeliveryStatus] = mapped_column(
+        _enum(DeliveryStatus, "delivery_status"),
+        default=DeliveryStatus.SENT,
+        index=True,
+    )
+    #: The provider's ID for the message, and for the payment link it carried.
+    #: Both are how a support question ("did we email them, and what did they
+    #: get?") is answered without guessing.
     provider_message_id: Mapped[str | None] = mapped_column(String(128), default=None)
+    payment_link_id: Mapped[str | None] = mapped_column(String(64), default=None, index=True)
+    #: Why a FAILED attempt failed. Empty on success.
+    provider_error: Mapped[str | None] = mapped_column(Text, default=None)
+
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+    @property
+    def counts_as_contact(self) -> bool:
+        """Whether this attempt should consume the customer's contact budget."""
+
+        return self.status in (DeliveryStatus.SENT, DeliveryStatus.SIMULATED)
 
     invoice: Mapped[Invoice] = relationship(back_populates="contacts")
 

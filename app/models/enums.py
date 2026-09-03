@@ -65,6 +65,26 @@ class ContactChannel(str, Enum):
     WHATSAPP = "whatsapp"
 
 
+class DeliveryStatus(str, Enum):
+    """What actually happened to one outbound message.
+
+    The distinction this enum exists to make: a ``ContactLog`` row used to mean
+    "we contacted them", when in fact nothing had been sent. Only ``SENT`` and
+    ``SIMULATED`` count as contact for the frequency and volume caps.
+    ``FAILED`` rows are kept because a failed send is worth seeing, but they
+    must never consume a customer's contact budget or advance the ladder --
+    otherwise a provider outage silently exhausts the book.
+    """
+
+    #: Handed to the provider and acknowledged with a message ID.
+    SENT = "sent"
+    #: DRY_RUN was on. Fully rendered, deliberately not delivered. Counts as
+    #: contact so a dry run exercises the same caps a real run would.
+    SIMULATED = "simulated"
+    #: The provider rejected it or was unreachable. Does not count as contact.
+    FAILED = "failed"
+
+
 class DecisionOutcome(str, Enum):
     """How a policy-gated decision resolved."""
 
