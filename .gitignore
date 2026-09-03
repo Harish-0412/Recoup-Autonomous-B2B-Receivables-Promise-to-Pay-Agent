@@ -16,3 +16,8 @@ src/ml/artifacts_store/*
 
 # Generated synthetic datasets: reproducible from a seed, never committed.
 data/synthetic/
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
