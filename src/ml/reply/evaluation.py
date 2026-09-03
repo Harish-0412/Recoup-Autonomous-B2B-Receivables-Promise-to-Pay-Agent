@@ -6,7 +6,7 @@ compliance-critical one and also the rarest kind of message in a real inbox, so
 it is the first thing a single accuracy number would bury.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 
 import numpy as np
@@ -120,6 +120,16 @@ class CascadeReport(BaseModel):
     threshold: float
     model_accuracy_on_resolved: float
     model_accuracy_on_escalated: float
+    #: Thresholds that actually applied, per predicted intent, when they differ
+    #: from the base one.
+    intent_thresholds: dict[str, float] = Field(default_factory=dict)
+    #: Predictions Stage C acted on, broken down by the intent it predicted.
+    kept_by_intent: dict[str, int] = Field(default_factory=dict)
+    #: ...and how many of those were right. This is the number that matters for
+    #: an intent whose false positives are expensive: overall precision counts
+    #: predictions the cascade escalated and never acted on.
+    kept_precision_by_intent: dict[str, float] = Field(default_factory=dict)
+    escalated_by_intent: dict[str, int] = Field(default_factory=dict)
 
     @property
     def resolution_rate(self) -> float:
@@ -280,24 +290,49 @@ def cascade_report(
     confidences: Sequence[float],
     *,
     threshold: float,
+    intent_thresholds: Mapping[str, float] | None = None,
 ) -> CascadeReport:
     """How the confidence threshold splits traffic between Stage C and Stage A.
 
     The number worth reading is not the resolution rate on its own but the pair
     of accuracies: the cascade only earns its place if the model is markedly
     more accurate on what it keeps than on what it hands off.
+
+    ``intent_thresholds`` mirrors the per-intent bars the cascade actually
+    routes on, so the measurement matches production rather than a simplified
+    version of it. ``kept_precision_by_intent`` is then the honest precision:
+    it counts only the predictions the cascade acted on, which is what a false
+    positive costs something for.
     """
 
     if not (len(y_true) == len(y_pred) == len(confidences)):
         raise ValueError("y_true, y_pred and confidences must be the same length")
 
-    resolved = [i for i, c in enumerate(confidences) if c >= threshold]
-    escalated = [i for i, c in enumerate(confidences) if c < threshold]
+    bars = dict(intent_thresholds or {})
+
+    def bar_for(label: str) -> float:
+        return max(threshold, bars.get(label, threshold))
+
+    resolved = [i for i, c in enumerate(confidences) if c >= bar_for(y_pred[i])]
+    escalated = [i for i, c in enumerate(confidences) if c < bar_for(y_pred[i])]
 
     def accuracy(indices: list[int]) -> float:
         if not indices:
             return 0.0
         return sum(1 for i in indices if y_true[i] == y_pred[i]) / len(indices)
+
+    kept: dict[str, int] = {}
+    correct: dict[str, int] = {}
+    for i in resolved:
+        label = y_pred[i]
+        kept[label] = kept.get(label, 0) + 1
+        if y_true[i] == label:
+            correct[label] = correct.get(label, 0) + 1
+
+    dropped: dict[str, int] = {}
+    for i in escalated:
+        label = y_pred[i]
+        dropped[label] = dropped.get(label, 0) + 1
 
     return CascadeReport(
         total=len(y_true),
@@ -306,6 +341,12 @@ def cascade_report(
         threshold=threshold,
         model_accuracy_on_resolved=round(accuracy(resolved), 6),
         model_accuracy_on_escalated=round(accuracy(escalated), 6),
+        intent_thresholds={k: v for k, v in bars.items() if v > threshold},
+        kept_by_intent=dict(sorted(kept.items())),
+        kept_precision_by_intent={
+            label: round(correct.get(label, 0) / count, 6) for label, count in sorted(kept.items())
+        },
+        escalated_by_intent=dict(sorted(dropped.items())),
     )
 
 
@@ -337,4 +378,129 @@ def format_classification_report(report: ClassificationReport) -> str:
     lines.append(f"{'accuracy':<24}{'':>8}{'':>8}{report.accuracy:>8.3f}{report.n_examples:>9d}")
     lines.append(f"{'macro f1':<24}{'':>8}{'':>8}{report.macro_f1:>8.3f}")
     lines.append(f"{'weighted f1':<24}{'':>8}{'':>8}{report.weighted_f1:>8.3f}")
+    return "\n".join(lines)
+
+
+class AggregatedClassMetric(BaseModel):
+    """One class's metrics averaged over several independent splits."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    label: str
+    precision_mean: float
+    precision_std: float
+    precision_min: float
+    precision_max: float
+    recall_mean: float
+    recall_std: float
+    f1_mean: float
+    f1_std: float
+    support_total: int
+
+
+class RepeatedEvaluation(BaseModel):
+    """Metrics over repeated grouped splits, with their spread.
+
+    A single grouped split puts only a handful of templates in the test set, so
+    which ones land there moves per-class precision by tens of points. One
+    split therefore cannot tell you whether a change helped; the spread across
+    several can. Reporting the mean without the spread would be the same
+    mistake in a more confident voice.
+    """
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    repeats: int
+    seeds: list[int]
+    accuracy_mean: float
+    accuracy_std: float
+    macro_f1_mean: float
+    macro_f1_std: float
+    per_class: list[AggregatedClassMetric]
+
+    def for_label(self, label: str) -> AggregatedClassMetric | None:
+        return next((row for row in self.per_class if row.label == label), None)
+
+
+def _mean_std(values: Sequence[float]) -> tuple[float, float]:
+    if not values:
+        return 0.0, 0.0
+    array = np.asarray(values, dtype=float)
+    return float(array.mean()), float(array.std(ddof=0))
+
+
+def aggregate_classification_reports(
+    reports: Sequence[ClassificationReport],
+    seeds: Sequence[int],
+) -> RepeatedEvaluation:
+    """Average per-class metrics across repeated splits and keep the spread."""
+
+    if not reports:
+        raise ValueError("need at least one report to aggregate")
+
+    accuracy_mean, accuracy_std = _mean_std([r.accuracy for r in reports])
+    macro_mean, macro_std = _mean_std([r.macro_f1 for r in reports])
+
+    by_label: dict[str, list[ClassMetrics]] = {}
+    for report in reports:
+        for row in report.per_class:
+            by_label.setdefault(row.label, []).append(row)
+
+    per_class: list[AggregatedClassMetric] = []
+    for label in sorted(by_label):
+        rows = by_label[label]
+        precisions = [row.precision for row in rows]
+        p_mean, p_std = _mean_std(precisions)
+        r_mean, r_std = _mean_std([row.recall for row in rows])
+        f_mean, f_std = _mean_std([row.f1 for row in rows])
+        per_class.append(
+            AggregatedClassMetric(
+                label=label,
+                precision_mean=round(p_mean, 6),
+                precision_std=round(p_std, 6),
+                precision_min=round(min(precisions), 6),
+                precision_max=round(max(precisions), 6),
+                recall_mean=round(r_mean, 6),
+                recall_std=round(r_std, 6),
+                f1_mean=round(f_mean, 6),
+                f1_std=round(f_std, 6),
+                support_total=sum(row.support for row in rows),
+            )
+        )
+
+    return RepeatedEvaluation(
+        repeats=len(reports),
+        seeds=list(seeds),
+        accuracy_mean=round(accuracy_mean, 6),
+        accuracy_std=round(accuracy_std, 6),
+        macro_f1_mean=round(macro_mean, 6),
+        macro_f1_std=round(macro_std, 6),
+        per_class=per_class,
+    )
+
+
+def format_repeated_evaluation(evaluation: RepeatedEvaluation) -> str:
+    """Per-class mean +/- std across repeated splits, with the observed range."""
+
+    header = f"{'class':<24}{'prec':>16}{'range':>15}{'recall':>16}{'f1':>16}"
+    lines = [
+        f"over {evaluation.repeats} grouped splits (seeds {evaluation.seeds})",
+        header,
+        "-" * len(header),
+    ]
+    for row in evaluation.per_class:
+        lines.append(
+            f"{row.label:<24}"
+            f"{row.precision_mean:>9.3f}+-{row.precision_std:<5.3f}"
+            f"{row.precision_min:>7.2f}-{row.precision_max:<7.2f}"
+            f"{row.recall_mean:>9.3f}+-{row.recall_std:<5.3f}"
+            f"{row.f1_mean:>9.3f}+-{row.f1_std:<5.3f}"
+        )
+    lines.append("-" * len(header))
+    lines.append(
+        f"{'accuracy':<24}{evaluation.accuracy_mean:>9.3f}+-{evaluation.accuracy_std:<5.3f}"
+    )
+    lines.append(
+        f"{'macro f1':<24}{evaluation.macro_f1_mean:>9.3f}+-{evaluation.macro_f1_std:<5.3f}"
+    )
     return "\n".join(lines)

@@ -22,6 +22,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.ml.config import MLSettings  # noqa: E402
+from src.ml.reply.cascade import threshold_for_intent  # noqa: E402
 from src.ml.reply.classifier import ReplyIntentClassifier, save_classifier  # noqa: E402
 from src.ml.reply.dataset import (  # noqa: E402
     SplitName,
@@ -30,13 +31,27 @@ from src.ml.reply.dataset import (  # noqa: E402
     corpus_texts_and_labels,
 )
 from src.ml.reply.evaluation import (  # noqa: E402
+    aggregate_classification_reports,
     calibration_report,
     cascade_report,
     classification_report,
     entity_report,
     format_classification_report,
     format_confusion_matrix,
+    format_repeated_evaluation,
 )
+from src.ml.schemas import IntentLabel  # noqa: E402
+
+
+def _intent_thresholds(base: float) -> dict[str, float]:
+    """The per-intent bars the cascade actually routes on.
+
+    Read from ``threshold_for_intent`` rather than restated here, so the
+    evaluation cannot quietly measure a different policy than the one that
+    ships.
+    """
+
+    return {label.value: threshold_for_intent(label, base) for label in IntentLabel}
 
 
 def _train_and_evaluate(*, size: int, seed: int, strategy: str, threshold: float, as_of: date):
@@ -66,11 +81,21 @@ def _train_and_evaluate(*, size: int, seed: int, strategy: str, threshold: float
     reports = {
         "classification": classification_report(y_test, predictions),
         "calibration": calibration_report(y_test, predictions, confidences),
-        "cascade": cascade_report(y_test, predictions, confidences, threshold=threshold),
+        "cascade": cascade_report(
+            y_test,
+            predictions,
+            confidences,
+            threshold=threshold,
+            intent_thresholds=_intent_thresholds(threshold),
+        ),
         "validation_classification": classification_report(y_val, val_predictions),
         "validation_calibration": calibration_report(y_val, val_predictions, val_confidences),
         "validation_cascade": cascade_report(
-            y_val, val_predictions, val_confidences, threshold=threshold
+            y_val,
+            val_predictions,
+            val_confidences,
+            threshold=threshold,
+            intent_thresholds=_intent_thresholds(threshold),
         ),
     }
     return model, corpus, reports, (y_test, predictions, confidences)
@@ -78,7 +103,23 @@ def _train_and_evaluate(*, size: int, seed: int, strategy: str, threshold: float
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--size", type=int, default=1200, help="corpus size (800-1500 recommended)")
+    parser.add_argument(
+        "--size",
+        type=int,
+        # 94 templates x ~15 renderings each. Adding templates without raising
+        # this thins every template's representation and costs accuracy.
+        default=1400,
+        help="corpus size (800-1500 recommended)",
+    )
+    parser.add_argument(
+        "--repeats",
+        type=int,
+        default=5,
+        help=(
+            "independent grouped splits to average over. A single split leaves "
+            "only a handful of templates in test, so one number is noise"
+        ),
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "--threshold",
@@ -174,6 +215,49 @@ def main(argv: list[str] | None = None) -> int:
         f"{cascade.model_accuracy_on_escalated:.3f} on those"
     )
 
+    if cascade.intent_thresholds:
+        raised = ", ".join(
+            f"{label} >= {bar:.2f}" for label, bar in sorted(cascade.intent_thresholds.items())
+        )
+        print(f"  raised bars: {raised}")
+    print("\n  precision on what Stage C actually acts on (kept, not escalated):")
+    for label in sorted(cascade.kept_by_intent):
+        kept = cascade.kept_by_intent[label]
+        dropped = cascade.escalated_by_intent.get(label, 0)
+        print(
+            f"    {label:<24} P={cascade.kept_precision_by_intent[label]:.3f} "
+            f"on {kept:>3} kept ({dropped} escalated)"
+        )
+
+    repeated = None
+    if args.repeats > 1:
+        reports = []
+        seeds = [args.seed + offset for offset in range(args.repeats)]
+        for seed in seeds:
+            _, _, seed_reports, _ = _train_and_evaluate(
+                size=args.size,
+                seed=seed,
+                strategy="grouped",
+                threshold=threshold,
+                as_of=args.as_of,
+            )
+            reports.append(seed_reports["classification"])
+        repeated = aggregate_classification_reports(reports, seeds)
+        print()
+        print("=== repeated grouped splits (the number to quote) ===")
+        print(format_repeated_evaluation(repeated))
+        dispute = repeated.for_label("DISPUTE")
+        if dispute is not None:
+            print()
+            print(
+                f"  DISPUTE precision {dispute.precision_mean:.3f} "
+                f"+- {dispute.precision_std:.3f} "
+                f"(range {dispute.precision_min:.2f}-{dispute.precision_max:.2f}). "
+                "The spread is wide because a grouped split leaves few DISPUTE "
+                "templates in test, which is why the raised cascade bar -- not "
+                "this number -- is what protects the decision."
+            )
+
     entities = entity_report(grouped_corpus.examples)
     print("\nentity extraction over the whole corpus:")
     print(
@@ -216,6 +300,7 @@ def main(argv: list[str] | None = None) -> int:
             "intent_counts": grouped_corpus.intent_counts(),
             "audit": json.loads(audit.model_dump_json()),
         },
+        "repeated": json.loads(repeated.model_dump_json()) if repeated else None,
         "threshold": threshold,
         "grouped_split": {
             name: json.loads(report.model_dump_json()) for name, report in grouped_reports.items()

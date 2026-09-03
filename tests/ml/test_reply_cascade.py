@@ -45,7 +45,7 @@ class StubLLM:
 
 @pytest.fixture(scope="module")
 def trained():
-    corpus = build_corpus(size=1200, seed=42)
+    corpus = build_corpus(seed=42)
     texts, labels = corpus_texts_and_labels(corpus.for_split(SplitName.TRAIN))
     return ReplyIntentClassifier.fit(texts, labels, seed=42)
 
@@ -317,11 +317,34 @@ def test_an_escalated_reply_still_gets_its_entities(trained, monkeypatch):
 
 
 def test_the_opt_out_guard_still_overrides_the_trained_model(trained, monkeypatch):
-    """Stage C is a signal; an explicit stop-contact request is still binding."""
+    """Stage C is a signal; an explicit stop-contact request is still binding.
+
+    The classifier is forced to answer DISPUTE here on purpose. Asserting the
+    override against the real model would only prove the model happened to get
+    this sentence right, and would start failing the day it got better -- which
+    is what this test did before. What must hold is that the deterministic
+    guard wins whatever Stage C says, so Stage C is made to say the wrong
+    thing.
+    """
 
     import src.ml.reply.cascade as cascade_module
 
-    monkeypatch.setattr(cascade_module, "load_classifier", lambda *a, **k: (trained, None))
+    class WrongClassifier:
+        classes = trained.classes
+
+        def predict_one(self, text):
+            from src.ml.reply.classifier import IntentPrediction
+
+            return IntentPrediction(
+                intent=IntentLabel.DISPUTE,
+                confidence=0.99,
+                probabilities={IntentLabel.DISPUTE.value: 0.99},
+                top_terms=[],
+            )
+
+    monkeypatch.setattr(
+        cascade_module, "load_classifier", lambda *a, **k: (WrongClassifier(), None)
+    )
     install_cascade_classifier()
 
     prediction = run(

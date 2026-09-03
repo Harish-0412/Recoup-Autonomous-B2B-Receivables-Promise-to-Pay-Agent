@@ -376,6 +376,7 @@ Use this table as a running checklist while building — update it honestly as p
 | Synthetic dataset generator | ☑ Done — `src/data/synthetic_generator.py`, seeded and tested |
 | ML prediction schemas & contracts | ☑ Done — `src/ml/schemas/` |
 | Reply understanding (LLM baseline) | ☑ Done — `instructor`-backed, degrades to `OTHER` |
+| Reply intent classifier (Stage C) | ☑ Done — `tfidf-svm-intent`; grouped macro-F1 0.764, cascade keeps 35.6% at 0.917 accuracy ([model card](docs/reply_classifier_model_card.md)) |
 | Action executor | ☑ Done — sends via Resend + Razorpay links; `DRY_RUN` by default |
 | Prioritization scorer | ☑ Done — rules-based; declares `fallback_used=True` |
 | Recovery-probability model | ☑ Done — `xgb-recovery`, calibrated; AUC 0.779 vs 0.732 rules ([model card](docs/recovery_model_card.md)) |

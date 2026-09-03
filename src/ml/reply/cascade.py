@@ -27,9 +27,36 @@ from src.ml.schemas import (
     FallbackReason,
     FallbackResolver,
     FallbackResult,
+    IntentLabel,
     ReplyIntentPrediction,
 )
 from src.ml.versioning import utc_now
+
+
+def threshold_for_intent(
+    intent: IntentLabel,
+    base_threshold: float,
+    settings: MLSettings | None = None,
+) -> float:
+    """The confidence Stage C must reach before this intent is acted on.
+
+    One threshold for every class assumes every mistake costs the same, and
+    they do not. DISPUTE is the expensive false positive in this system: acting
+    on it freezes escalation and hands the invoice to a human, so a wrong one
+    silently stops collection on a customer who never disputed anything. It is
+    held to a higher bar, and borderline cases go to the LLM instead.
+
+    OPT_OUT is deliberately left on the base threshold. There the costly error
+    runs the other way -- missing a genuine opt-out is a compliance failure,
+    while a false positive costs one silenced reminder -- and it already has a
+    deterministic guard in ``service.py`` that does not consult confidence
+    at all.
+    """
+
+    active_settings = settings or MLSettings()
+    if intent is IntentLabel.DISPUTE:
+        return max(base_threshold, active_settings.ml_dispute_confidence_threshold)
+    return base_threshold
 
 
 async def classify_reply_cascade(
@@ -109,12 +136,14 @@ async def classify_reply_cascade(
             f"Stage C raised ({exc}); answered by the LLM baseline.",
         )
 
-    if result.confidence < active_threshold:
+    required = threshold_for_intent(result.intent, active_threshold, active_settings)
+    if result.confidence < required:
+        raised = " (raised for this intent)" if required > active_threshold else ""
         return await escalate(
             FallbackReason.LOW_CONFIDENCE,
             (
                 f"Stage C was {result.confidence:.2f} confident in "
-                f"{result.intent.value}, below the {active_threshold:.2f} threshold; "
+                f"{result.intent.value}, below the {required:.2f} threshold{raised}; "
                 "escalated to the LLM."
             ),
         )

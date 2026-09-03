@@ -53,6 +53,11 @@ class EdgeCaseKind(str, Enum):
     WRONG_INVOICE = "wrong_invoice"
     SARCASM = "sarcasm"
     NOISY_SHORTHAND = "noisy_shorthand"
+    #: Uses dispute vocabulary (GST, PO, GRN, rate, quantity) without actually
+    #: contesting the invoice. These are hard negatives: they live in the core
+    #: pool rather than the edge pool, because the confusable mass is common,
+    #: not rare, and the classifier has to see enough of it to learn the line.
+    DISPUTE_ADJACENT = "dispute_adjacent"
 
 
 class ReplyTemplate(BaseModel):
@@ -527,6 +532,56 @@ CORE_TEMPLATES: tuple[ReplyTemplate, ...] = (
     _t("q13", _Q, "formal", "Kindly provide a duplicate copy for our records."),
     _t("q14", _Q, "neutral", "Do you accept UPI for this payment?"),
     _t("q15", _Q, "curt", "Send the ledger."),
+    _t(
+        "qh01",
+        _Q,
+        "neutral",
+        "Quick query on the GST line -- is this 12% or 18% for this HSN code?",
+        edge_case_kind=EdgeCaseKind.DISPUTE_ADJACENT,
+    ),
+    _t(
+        "qh02",
+        _Q,
+        "formal",
+        "Checking the PO reference before we release payment. Which PO does this map to?",
+        edge_case_kind=EdgeCaseKind.DISPUTE_ADJACENT,
+    ),
+    _t(
+        "qh03",
+        _Q,
+        "neutral",
+        "Can you confirm the quantity billed here? Just reconciling against our GRN "
+        "before we process.",
+        edge_case_kind=EdgeCaseKind.DISPUTE_ADJACENT,
+    ),
+    _t(
+        "qh04",
+        _Q,
+        "curt",
+        "Is the freight charge shown separately or included in the rate?",
+        edge_case_kind=EdgeCaseKind.DISPUTE_ADJACENT,
+    ),
+    _t(
+        "qh05",
+        _Q,
+        "hinglish",
+        "GST credit reconciliation ke liye is invoice ka HSN code bhej dena.",
+        edge_case_kind=EdgeCaseKind.DISPUTE_ADJACENT,
+    ),
+    _t(
+        "qh06",
+        _Q,
+        "formal",
+        "Could you confirm the contracted rate applied here, purely for our records?",
+        edge_case_kind=EdgeCaseKind.DISPUTE_ADJACENT,
+    ),
+    _t(
+        "qh07",
+        _Q,
+        "neutral",
+        "Has a credit note been issued against this, or should we process the full amount?",
+        edge_case_kind=EdgeCaseKind.DISPUTE_ADJACENT,
+    ),
     # --- OTHER --------------------------------------------------------------
     _t("x01", _X, "curt", "Ok."),
     _t("x02", _X, "neutral", "Received, thanks."),
@@ -806,7 +861,7 @@ def _stratified_template_split(
 
 def build_corpus(
     *,
-    size: int = 1200,
+    size: int = 1400,
     seed: int = 42,
     reference_date: date | None = None,
     split_strategy: str = "grouped",
@@ -932,7 +987,10 @@ def _assign_random_splits(
 #: a mislabelling check, so it must survive the typos the noise transform adds.
 _OPT_OUT_CUE_RE = re.compile(
     r"\bunsubscrib\w*|\bstop\b|\bremove\b|\bopt\b|\bdo\s*n[o']?t\b|\bdont\b"
-    r"|\bnever\b|\bmat\b|\bband\b|\boff\b|\bnot wish\b",
+    # "band"/"bnd"/"bn" karo -- the surface-noise renderer drops vowels, which
+    # is how Hinglish is actually typed, so the cue list has to cover the
+    # shortened spellings too.
+    r"|\bnever\b|\bmat\b|\bb(?:an|n)d?\b|\boff\b|\bnot wish\b",
     re.IGNORECASE,
 )
 

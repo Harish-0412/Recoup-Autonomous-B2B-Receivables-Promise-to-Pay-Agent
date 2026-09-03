@@ -5,7 +5,6 @@ import pytest
 from src.ml.reply.dataset import (
     ALL_TEMPLATES,
     CORE_TEMPLATES,
-    EDGE_CASE_TEMPLATES,
     EdgeCaseKind,
     LabelledReply,
     SplitName,
@@ -42,9 +41,27 @@ def test_template_ids_are_unique():
 
 
 def test_every_edge_case_kind_is_represented():
-    kinds = {t.edge_case_kind for t in EDGE_CASE_TEMPLATES if t.edge_case_kind}
+    kinds = {t.edge_case_kind for t in ALL_TEMPLATES if t.edge_case_kind}
 
     assert kinds == set(EdgeCaseKind)
+
+
+def test_dispute_adjacent_negatives_live_in_the_core_pool():
+    """Hard negatives are common, not rare, so they are not sampled as edge cases.
+
+    The edge pool is drawn at ``edge_case_fraction``; a template in it appears
+    in roughly one example in eight. Replies that use dispute vocabulary
+    without disputing anything are ordinary traffic, and the classifier only
+    learns the line if it sees them at full density.
+    """
+
+    adjacent = [t for t in ALL_TEMPLATES if t.edge_case_kind is EdgeCaseKind.DISPUTE_ADJACENT]
+    assert adjacent
+
+    core_ids = {t.template_id for t in CORE_TEMPLATES}
+    for template in adjacent:
+        assert template.template_id in core_ids, template.template_id
+        assert template.intent in {IntentLabel.GENERAL_QUERY, IntentLabel.OTHER}
 
 
 def test_every_dispute_template_declares_a_reason():

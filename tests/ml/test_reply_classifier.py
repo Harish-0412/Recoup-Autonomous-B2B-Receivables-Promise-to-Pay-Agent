@@ -24,7 +24,7 @@ from src.ml.schemas import IntentLabel
 
 @pytest.fixture(scope="module")
 def corpus():
-    return build_corpus(size=1200, seed=42)
+    return build_corpus(seed=42)
 
 
 @pytest.fixture(scope="module")
@@ -148,7 +148,7 @@ def test_a_random_split_scores_higher_than_a_grouped_one():
 
     scores = {}
     for strategy in ("grouped", "random"):
-        corpus = build_corpus(size=1200, seed=42, split_strategy=strategy)
+        corpus = build_corpus(seed=42, split_strategy=strategy)
         x_train, y_train = corpus_texts_and_labels(corpus.for_split(SplitName.TRAIN))
         x_test, y_test = corpus_texts_and_labels(corpus.for_split(SplitName.TEST))
         model = ReplyIntentClassifier.fit(x_train, y_train, seed=42)

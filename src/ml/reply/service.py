@@ -60,7 +60,11 @@ _OPT_OUT_PATTERNS: tuple[str, ...] = (
     r"\bremove\s+(?:my|this|our)\s+(?:number|contact|email|details)\b",
     r"\btake\s+me\s+off\b",
     r"\bmat\s+bhej\w*\b",
-    r"\bband\s+kar\w*\b",
+    # "band karo" = stop it. Vowel-dropped shorthand ("bnd karo", "bn karo") is
+    # ordinary in Hinglish WhatsApp text, and the corpus audit caught the guard
+    # missing it. A missed opt-out is a compliance failure, so the pattern
+    # covers the shorthand rather than only the full spelling.
+    r"\bb(?:an|n)d?\s+kar\w*\b",
 )
 
 _OPT_OUT_REGEX = re.compile("|".join(_OPT_OUT_PATTERNS), re.IGNORECASE)
