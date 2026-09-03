@@ -65,6 +65,24 @@ class ContactChannel(str, Enum):
     WHATSAPP = "whatsapp"
 
 
+class ReplyDisposition(str, Enum):
+    """What was done with one inbound customer reply.
+
+    The distinction that matters is ``NEEDS_REVIEW``. A classifier that is
+    unsure must hand the reply to a person rather than guessing, because the
+    two failure modes are not symmetric: inventing a promise that the customer
+    never made stops the agent chasing a live debt, and mis-reading an
+    unsubscribe keeps mailing someone who asked you to stop.
+    """
+
+    #: Classified confidently and acted on without a human.
+    AUTO_HANDLED = "auto_handled"
+    #: Queued for a person. Nothing was recorded from it.
+    NEEDS_REVIEW = "needs_review"
+    #: A person has since dealt with it.
+    REVIEWED = "reviewed"
+
+
 class DeliveryStatus(str, Enum):
     """What actually happened to one outbound message.
 

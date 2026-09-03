@@ -150,6 +150,8 @@ def session(monkeypatch):
 def dry_run_service() -> ExecutionService:
     class _S:
         DRY_RUN = True
+        REPLY_ADDRESS_SECRET = "test-address-secret"
+        REPLY_INBOUND_DOMAIN = "reply.recoup.test"
 
     return ExecutionService(
         Gateways(payments=DryRunPaymentGateway(), email=DryRunEmailGateway(), dry_run=True),
@@ -294,7 +296,7 @@ async def test_provider_ids_reach_the_contact_row(session):
 
 
 class FailingEmailGateway:
-    async def send_email(self, *, to, subject, html, text):
+    async def send_email(self, *, to, subject, html, text, reply_to=None):
         return GatewayOutcome.failed("resend.emails.send failed: 503 upstream")
 
 
@@ -309,6 +311,8 @@ class FailingPaymentGateway:
 def service_with(payments=None, email=None) -> ExecutionService:
     class _S:
         DRY_RUN = False
+        REPLY_ADDRESS_SECRET = "test-address-secret"
+        REPLY_INBOUND_DOMAIN = "reply.recoup.test"
 
     return ExecutionService(
         Gateways(
@@ -492,3 +496,105 @@ def test_indian_digit_grouping():
     assert templates.format_inr(1_000) == "Rs 1,000"
     assert templates.format_inr(500) == "Rs 500"
     assert templates.format_inr(12_345_678) == "Rs 1,23,45,678"
+
+
+# --- the payment-link cap ---------------------------------------------------
+#
+# Razorpay refuses a payment link above Rs 5,00,000. Found by asking the real
+# test-mode API, not from the docs: Rs 5,00,000 is accepted, Rs 5,20,000 comes
+# back "amount exceeds maximum amount allowed".
+
+
+@pytest.mark.anyio
+async def test_an_invoice_over_the_cap_is_still_contacted(session):
+    """The bug this guards: refusing to write to a customer because their
+    invoice is *too large* silently exempts the biggest debts in the book."""
+
+    payments = DryRunPaymentGateway()
+    case = make_case(amount=520_000.0)
+    intent = ExecutionIntent.from_decision(case, *approved(case))
+
+    result = await service_with(payments=payments).execute(session, intent, FakeInvoiceRow())
+
+    assert result.delivered is True
+    assert result.payment_link_id is None
+    # No link was even attempted: this will never succeed on retry, so asking
+    # is pure latency and a guaranteed provider error in the logs.
+    assert payments.created == []
+
+
+@pytest.mark.anyio
+async def test_an_invoice_at_the_cap_still_gets_a_link(session):
+    payments = DryRunPaymentGateway()
+    case = make_case(amount=500_000.0)
+    intent = ExecutionIntent.from_decision(case, *approved(case))
+
+    result = await service_with(payments=payments).execute(session, intent, FakeInvoiceRow())
+
+    assert result.delivered is True
+    assert result.payment_link_id is not None
+    assert len(payments.created) == 1
+
+
+@pytest.mark.anyio
+async def test_a_discount_can_bring_an_invoice_under_the_cap(session):
+    """The cap applies to what is actually being asked for, not the face value."""
+
+    payments = DryRunPaymentGateway()
+    case = make_case(amount=520_000.0)
+    action, decision = approved(case, action_type=ActionType.OFFER_SETTLEMENT, discount_pct=10.0)
+    intent = ExecutionIntent.from_decision(case, action, decision)
+    assert intent.payable_amount == pytest.approx(468_000.0)
+
+    result = await service_with(payments=payments).execute(session, intent, FakeInvoiceRow())
+
+    assert result.payment_link_id is not None
+
+
+def test_a_message_without_a_link_does_not_trail_off():
+    """Every body used to end by introducing the link, so a message with none
+    stopped mid-sentence on a colon."""
+
+    case = make_case(amount=520_000.0)
+    intent = ExecutionIntent.from_decision(case, *approved(case))
+
+    message = templates.render(intent, None)
+
+    assert not message.text.rstrip().endswith(":")
+    assert "bank transfer details" in message.text
+    assert "settle it here:" not in message.text
+
+
+def test_a_message_with_a_link_offers_it():
+    from app.services.executor.contract import PaymentLink
+
+    case = make_case(amount=100_000.0)
+    intent = ExecutionIntent.from_decision(case, *approved(case))
+
+    message = templates.render(
+        intent, PaymentLink(link_id="p", url="https://rzp.io/i/x", amount=100_000.0)
+    )
+
+    assert "You can settle it here:" in message.text
+    assert "bank transfer details" not in message.text
+
+
+# --- reply routing ----------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_every_message_carries_a_tagged_reply_to(session):
+    """Without it an inbound reply cannot be matched to its invoice."""
+
+    email = DryRunEmailGateway()
+    case = make_case()
+    intent = ExecutionIntent.from_decision(case, *approved(case))
+
+    await service_with(email=email).execute(session, intent, FakeInvoiceRow())
+
+    reply_to = email.sent[-1]["reply_to"]
+    assert reply_to.startswith(f"reply+{case.invoice.invoice_id}.")
+
+    from app.services.reply_routing import resolve_invoice_id
+
+    assert resolve_invoice_id(reply_to, secret="test-address-secret") == case.invoice.invoice_id

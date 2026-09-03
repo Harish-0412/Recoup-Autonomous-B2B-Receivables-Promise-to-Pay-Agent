@@ -20,7 +20,17 @@ class ResendClient:
         subject: str,
         html: str,
         text: str | None = None,
+        reply_to: str | None = None,
     ) -> dict:
+        """Send one email.
+
+        ``reply_to`` carries the tagged address that routes a customer's reply
+        back to its invoice -- see ``app.services.reply_routing``. Without it a
+        reply arrives with no way to tell which debt it is about, short of
+        parsing the subject line, which is exactly what that module exists to
+        avoid.
+        """
+
         if isinstance(to, str):
             to = [to]
 
@@ -32,6 +42,8 @@ class ResendClient:
         }
         if text:
             params["text"] = text
+        if reply_to:
+            params["reply_to"] = reply_to
 
         logger.info("Sending email via Resend", to=to, subject=subject)
         response = cast(dict[Any, Any], resend.Emails.send(cast(Any, params)))

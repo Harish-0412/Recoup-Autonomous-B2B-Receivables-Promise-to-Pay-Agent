@@ -38,6 +38,17 @@ logger = get_logger(__name__)
 #: worker thread for the life of the process.
 DEFAULT_TIMEOUT_SECONDS = 20.0
 
+#: Razorpay refuses a payment link above this, with "amount exceeds maximum
+#: amount allowed". Found by asking it: Rs 5,00,000 is accepted and Rs 5,20,000
+#: is not.
+#:
+#: Checked before the call rather than by matching that error string, because a
+#: known limit should not be discovered through a failed request -- and because
+#: this is not a transient failure to retry. B2B invoices routinely exceed it,
+#: and an invoice over the cap must still get its reminder; see
+#: ``ExecutionService.execute``.
+RAZORPAY_PAYMENT_LINK_MAX_INR = 500_000.0
+
 
 @dataclass(frozen=True)
 class GatewayOutcome:
@@ -84,7 +95,7 @@ class EmailGateway(Protocol):
     """Delivers one email."""
 
     async def send_email(
-        self, *, to: str, subject: str, html: str, text: str
+        self, *, to: str, subject: str, html: str, text: str, reply_to: str | None = None
     ) -> GatewayOutcome: ...
 
 
@@ -178,7 +189,9 @@ class ResendGateway:
             self._client = get_resend_client()
         return self._client
 
-    async def send_email(self, *, to: str, subject: str, html: str, text: str) -> GatewayOutcome:
+    async def send_email(
+        self, *, to: str, subject: str, html: str, text: str, reply_to: str | None = None
+    ) -> GatewayOutcome:
         return await _call(
             "resend.emails.send",
             self.client.send_email,
@@ -186,6 +199,7 @@ class ResendGateway:
             subject=subject,
             html=html,
             text=text,
+            reply_to=reply_to,
         )
 
 
@@ -240,13 +254,16 @@ class DryRunEmailGateway:
     def __init__(self) -> None:
         self.sent: list[dict[str, Any]] = []
 
-    async def send_email(self, *, to: str, subject: str, html: str, text: str) -> GatewayOutcome:
+    async def send_email(
+        self, *, to: str, subject: str, html: str, text: str, reply_to: str | None = None
+    ) -> GatewayOutcome:
         record = {"id": f"email_dryrun_{len(self.sent) + 1}", "to": to, "subject": subject}
-        self.sent.append({**record, "text": text, "html": html})
+        self.sent.append({**record, "text": text, "html": html, "reply_to": reply_to})
         logger.info(
             "DRY RUN: email not sent",
             to=to,
             subject=subject,
+            reply_to=reply_to,
             body=text,
         )
         return GatewayOutcome.success(record)

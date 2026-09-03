@@ -20,17 +20,20 @@ from sqlalchemy.orm import selectinload
 
 from app.core.audit import DecisionLedger
 from app.core.domain import CaseSnapshot, snapshot_from_rows
+from app.core.promise_tracker import PromiseRecord
 from app.models import (
     ContactChannel,
     ContactLog,
     Customer,
     DecisionTrace,
     DeliveryStatus,
+    InboundReply,
     Invoice,
     InvoiceStatus,
     OptOut,
     Promise,
     PromiseStatus,
+    ReplyDisposition,
     WebhookEvent,
 )
 from src.ml.versioning import utc_now
@@ -311,3 +314,91 @@ async def webhook_already_processed(session: AsyncSession, event_id: str) -> boo
 
     result = await session.execute(select(WebhookEvent.id).where(WebhookEvent.event_id == event_id))
     return result.scalar_one_or_none() is not None
+
+
+# ---------------------------------------------------------------------------
+# Inbound replies and promises
+# ---------------------------------------------------------------------------
+
+
+async def get_inbound_reply(session: AsyncSession, reply_id: str) -> InboundReply | None:
+    """One stored reply by its provider message id, the idempotency key."""
+
+    result = await session.execute(select(InboundReply).where(InboundReply.reply_id == reply_id))
+    return result.scalar_one_or_none()
+
+
+async def get_customer_by_email(session: AsyncSession, email: str) -> Customer | None:
+    """Match a sender address to a customer, case-insensitively.
+
+    Only ever used as a *secondary* signal: the tagged reply-to address is what
+    identifies the invoice. This fills in who wrote, so an unmatched reply
+    still lands in the review queue attached to the right customer.
+    """
+
+    if not email:
+        return None
+    result = await session.execute(
+        select(Customer).where(func.lower(Customer.email) == email.strip().lower())
+    )
+    return result.scalars().first()
+
+
+async def record_promise(
+    session: AsyncSession,
+    invoice: Invoice,
+    promise: PromiseRecord,
+) -> Promise:
+    """Persist a promise extracted from a reply.
+
+    Any earlier pending promise on the same invoice is marked SUPERSEDED rather
+    than deleted or left open. Two live promises on one invoice would make
+    "did they keep it?" unanswerable, and the old one is still the record of
+    what the customer said last time.
+    """
+
+    existing = await session.execute(
+        select(Promise).where(
+            Promise.invoice_pk == invoice.id, Promise.status == PromiseStatus.PENDING
+        )
+    )
+    for stale in existing.scalars().all():
+        stale.status = PromiseStatus.SUPERSEDED
+        stale.resolved_at = utc_now()
+
+    row = Promise(
+        promise_id=promise.promise_id,
+        invoice_pk=invoice.id,
+        promised_amount=promise.promised_amount,
+        promised_date=promise.promised_date,
+        currency=promise.currency,
+        source_reply_id=promise.source_reply_id,
+        source_confidence=promise.source_confidence,
+        status=PromiseStatus.PENDING,
+    )
+    session.add(row)
+
+    # A live promise is why the policy gate goes quiet on this invoice; the
+    # status change is what the gate reads.
+    if invoice.status in (InvoiceStatus.OPEN, InvoiceStatus.IN_PROGRESS):
+        invoice.status = InvoiceStatus.PROMISED
+
+    await session.flush()
+    return row
+
+
+async def replies_needing_review(session: AsyncSession, *, limit: int = 100) -> list[InboundReply]:
+    """The human review queue, oldest first.
+
+    Oldest first on purpose: a queue worked newest-first leaves its oldest
+    items to rot, and the oldest unreviewed reply is the one most likely to be
+    a customer waiting on an answer.
+    """
+
+    result = await session.execute(
+        select(InboundReply)
+        .where(InboundReply.disposition == ReplyDisposition.NEEDS_REVIEW)
+        .order_by(InboundReply.received_at)
+        .limit(limit)
+    )
+    return list(result.scalars().all())

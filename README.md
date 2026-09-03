@@ -379,6 +379,7 @@ Use this table as a running checklist while building — update it honestly as p
 | Reply intent classifier (Stage C) | ☑ Done — `tfidf-svm-intent`; grouped macro-F1 0.764, cascade keeps 35.6% at 0.917 accuracy ([model card](docs/reply_classifier_model_card.md)) |
 | Action executor | ☑ Done — sends via Resend + Razorpay links; `DRY_RUN` by default |
 | Prioritization scorer | ☑ Done — rules-based; declares `fallback_used=True` |
+| Reply ingestion (Promise-to-Pay) | ☑ Done — `POST /api/v1/replies`, signed reply-to routing, human review queue |
 | Recovery-probability model | ☑ Done — `xgb-recovery`, calibrated; AUC 0.779 vs 0.732 rules ([model card](docs/recovery_model_card.md)) |
 | Policy / gate engine | ☑ Done — `business-rules`; rules compiled from config |
 | Escalation state machine | ☑ Done — `transitions`; `auto_transitions=False` |
@@ -407,8 +408,12 @@ Use this table as a running checklist while building — update it honestly as p
   default so a fresh clone with no trained artifact behaves predictably. Either
   way the model is trained on **synthetic** data — the metrics show the pipeline
   recovers a signal that was deliberately planted, not real-world accuracy.
-- Reply understanding is not connected to the decision cycle. It classifies
-  correctly in isolation; `run_cycle` does not yet consume its output.
+- Reply understanding is connected: `POST /api/v1/replies` receives a Resend
+  inbound webhook, routes it to an invoice by the signed `Reply-To` address,
+  classifies it, and records a promise or an opt-out. Replies the classifier is
+  unsure about go to `GET /api/v1/replies/review` rather than becoming a guessed
+  promise. What `run_cycle` still does not do is *re-plan* on a promise beyond
+  the policy gate going quiet while one is open.
 
 ## What's Deliberately Out of Scope for the Buildathon
 

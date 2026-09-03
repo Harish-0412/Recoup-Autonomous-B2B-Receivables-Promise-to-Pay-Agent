@@ -18,11 +18,13 @@ from app import models as _models  # noqa: F401
 from app.api.health import router as health_router
 from app.api.invoices import router as invoices_router
 from app.api.policy import router as policy_router
+from app.api.replies import router as replies_router
 from app.api.reports import router as reports_router
 from app.api.webhooks import router as webhooks_router
 from app.core.config import get_settings
 from app.core.logging import get_logger, setup_logging
 from app.db.session import close_db, engine
+from src.ml.reply.cascade import install_cascade_classifier
 
 settings = get_settings()
 logger = get_logger(__name__)
@@ -47,6 +49,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with engine.connect() as connection:
         await connection.execute(text("SELECT 1"))
     logger.info("Database reachable", pool_mode=settings.DB_POOL_MODE)
+
+    # Reply understanding: the trained TF-IDF/SVM classifier answers the clear
+    # cases locally in milliseconds and escalates only the ambiguous ones to the
+    # LLM. ``cascade`` deliberately does not install itself on import -- doing
+    # that as an import side effect makes test failures hard to explain -- so
+    # this is the one place it is bound. With no trained artifact present it
+    # degrades to the LLM baseline, and with no LLM key to a flagged fallback
+    # that routes the reply to human review.
+    install_cascade_classifier()
+    logger.info("Reply classifier cascade installed")
 
     yield
     await close_db()
@@ -80,6 +92,7 @@ app.include_router(invoices_router, prefix="/api/v1")
 app.include_router(webhooks_router, prefix="/api/v1")
 app.include_router(reports_router, prefix="/api/v1")
 app.include_router(policy_router, prefix="/api/v1")
+app.include_router(replies_router, prefix="/api/v1")
 
 
 @app.get("/")

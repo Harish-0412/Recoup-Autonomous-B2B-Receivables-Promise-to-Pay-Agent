@@ -15,11 +15,13 @@ from app.models.enums import (
     InterventionTier,
     InvoiceStatus,
     PromiseStatus,
+    ReplyDisposition,
 )
 from app.models.tables import (
     ContactLog,
     Customer,
     DecisionTrace,
+    InboundReply,
     Invoice,
     OptOut,
     Promise,
@@ -35,10 +37,12 @@ __all__ = [
     "DecisionTrace",
     "EscalationState",
     "InterventionTier",
+    "InboundReply",
     "Invoice",
     "InvoiceStatus",
     "OptOut",
     "Promise",
     "PromiseStatus",
+    "ReplyDisposition",
     "WebhookEvent",
 ]

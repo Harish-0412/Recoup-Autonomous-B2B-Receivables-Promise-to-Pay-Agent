@@ -44,7 +44,8 @@ from app.services.executor.contract import (
     PaymentLink,
     RenderedMessage,
 )
-from app.services.executor.gateways import Gateways
+from app.services.executor.gateways import RAZORPAY_PAYMENT_LINK_MAX_INR, Gateways
+from app.services.reply_routing import reply_address
 
 logger = get_logger(__name__)
 
@@ -170,26 +171,50 @@ class ExecutionService:
             log.warning("Cannot contact customer", reason="no_email")
             return result
 
-        link, link_error = await self._resolve_payment_link(intent, invoice)
-        if link is None:
-            message = templates.render(intent, None)
-            result = ExecutionResult.failure(
-                intent,
-                link_error or "payment link unavailable",
-                subject=message.subject,
-                body_preview=message.preview(),
+        # Invoices above Razorpay's payment-link cap still get their reminder,
+        # just without a link. Refusing to write to a customer because their
+        # invoice is *too large* would silently exempt exactly the debts worth
+        # chasing most -- and unlike a provider outage, this will never succeed
+        # on retry, so there is nothing to wait for.
+        over_cap = intent.payable_amount > RAZORPAY_PAYMENT_LINK_MAX_INR
+        link: PaymentLink | None = None
+        link_error: str | None = None
+
+        if over_cap:
+            log.info(
+                "Invoice exceeds the payment-link cap; sending without one",
+                amount=intent.payable_amount,
+                cap=RAZORPAY_PAYMENT_LINK_MAX_INR,
             )
-            await self._record(session, invoice, intent, result, message)
-            log.warning("Payment link failed; nothing sent", error=link_error)
-            return result
+        else:
+            link, link_error = await self._resolve_payment_link(intent, invoice)
+            if link is None:
+                message = templates.render(intent, None)
+                result = ExecutionResult.failure(
+                    intent,
+                    link_error or "payment link unavailable",
+                    subject=message.subject,
+                    body_preview=message.preview(),
+                )
+                await self._record(session, invoice, intent, result, message)
+                log.warning("Payment link failed; nothing sent", error=link_error)
+                return result
 
         message = templates.render(intent, link)
 
+        # The tagged Reply-To is what closes the loop: a customer's reply comes
+        # back to an address that names, and signs, the invoice it belongs to,
+        # so the inbound handler never has to guess from a subject line.
         sent = await self.gateways.email.send_email(
             to=recipient,
             subject=message.subject,
             html=message.html,
             text=message.text,
+            reply_to=reply_address(
+                intent.invoice_id,
+                secret=self.settings.REPLY_ADDRESS_SECRET,
+                domain=self.settings.REPLY_INBOUND_DOMAIN,
+            ),
         )
 
         if not sent.ok:
@@ -198,13 +223,14 @@ class ExecutionService:
                 sent.error or "email send failed",
                 subject=message.subject,
                 body_preview=message.preview(),
-                payment_link_id=link.link_id,
+                payment_link_id=link.link_id if link else None,
             )
             # The link is real and must still be stored, so a customer who pays
             # it any other way is reconciled correctly.
-            result = result.model_copy(
-                update={"payment_link_url": link.url, "payment_link_reused": link.reused}
-            )
+            if link is not None:
+                result = result.model_copy(
+                    update={"payment_link_url": link.url, "payment_link_reused": link.reused}
+                )
             await self._record(session, invoice, intent, result, message)
             log.warning("Send failed; ladder not advanced", error=sent.error)
             return result
@@ -218,9 +244,9 @@ class ExecutionService:
             subject=message.subject,
             body_preview=message.preview(),
             provider_message_id=str(payload.get("id") or "") or None,
-            payment_link_id=link.link_id,
-            payment_link_url=link.url,
-            payment_link_reused=link.reused,
+            payment_link_id=link.link_id if link else None,
+            payment_link_url=link.url if link else None,
+            payment_link_reused=bool(link and link.reused),
             amount_requested=intent.payable_amount,
         )
         await self._record(session, invoice, intent, result, message)
@@ -228,8 +254,8 @@ class ExecutionService:
             "Delivered",
             status=result.status.value,
             provider_message_id=result.provider_message_id,
-            payment_link_id=link.link_id,
-            payment_link_reused=link.reused,
+            payment_link_id=link.link_id if link else None,
+            payment_link_reused=bool(link and link.reused),
             amount=result.amount_requested,
         )
         return result

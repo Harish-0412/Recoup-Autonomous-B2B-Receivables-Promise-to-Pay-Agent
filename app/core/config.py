@@ -93,6 +93,24 @@ class Settings(BaseSettings):
         default="noreply@yourdomain.com",
         description="From email address for Resend",
     )
+    #: Signing secret for Resend's inbound webhook (Svix scheme).
+    RESEND_WEBHOOK_SECRET: str = Field(
+        default="whsec_xxxxxxxxxxxxxxxxxxxxxxxx",
+        description="Resend inbound webhook signing secret",
+    )
+    #: Domain that receives replies. Outbound mail sets Reply-To to
+    #: ``reply+<invoice>.<signature>@<this domain>``, which is how an inbound
+    #: reply is matched to an invoice without parsing the subject line.
+    REPLY_INBOUND_DOMAIN: str = Field(
+        default="reply.yourdomain.com",
+        description="Domain that receives tagged reply addresses",
+    )
+    #: HMAC key for those tagged addresses. Without it the address format is
+    #: guessable, and anyone could post a reply naming any invoice in the book.
+    REPLY_ADDRESS_SECRET: str = Field(
+        default="change-me-reply-address-secret",
+        description="HMAC key signing tagged reply-to addresses",
+    )
 
     # Groq LLM
     GROQ_API_KEY: str | None = Field(
@@ -210,6 +228,9 @@ class Settings(BaseSettings):
             "RAZORPAY_WEBHOOK_SECRET": "xxxxxxxxxxxxxxxx",
             "RESEND_API_KEY": "re_xxxxxxxxxxxxxxxxxxxx",
             "RESEND_FROM_EMAIL": "yourdomain.com",
+            "RESEND_WEBHOOK_SECRET": "whsec_xxxxxxxxxxxxxxxxxxxxxxxx",
+            "REPLY_INBOUND_DOMAIN": "reply.yourdomain.com",
+            "REPLY_ADDRESS_SECRET": "change-me-reply-address-secret",
         }
         unset = [
             name for name, marker in placeholders.items() if marker in str(getattr(self, name, ""))

@@ -63,12 +63,16 @@ def _subject(intent: ExecutionIntent) -> str:
 
 
 #: Body copy per rung. Firmness rises; the tone stays professional throughout.
+#:
+#: None of these end with the call to action. The CTA depends on whether a
+#: payment link exists, and building it into the body meant a message with no
+#: link trailed off mid-sentence -- reached for real, because Razorpay caps
+#: payment links at Rs 5,00,000 and B2B invoices routinely exceed that.
 _BODIES: dict[str, str] = {
     "reminder_1": (
         "Our records show invoice {invoice_id} for {amount} became due on "
         "{due_date} and is now {days} days past due.\n\n"
-        "If it is already scheduled for payment, please ignore this note. "
-        "Otherwise you can settle it here:"
+        "If it is already scheduled for payment, please ignore this note."
     ),
     "reminder_2": (
         "We wrote to you about invoice {invoice_id} for {amount}, which was due "
@@ -76,22 +80,29 @@ _BODIES: dict[str, str] = {
         "the payment.\n\n"
         "If something is holding it up -- a missing purchase order, a query on "
         "the amount -- please reply and tell us; we would rather resolve it "
-        "than keep writing. To settle it now:"
+        "than keep writing."
     ),
     "final_notice": (
         "Invoice {invoice_id} for {amount} is now {days} days past due, and our "
         "previous reminders have gone unanswered.\n\n"
         "Unless the amount is paid or you contact us to arrange terms, this "
-        "account will be passed to our team for manual recovery. We would "
-        "prefer to close it here:"
+        "account will be passed to our team for manual recovery."
     ),
 }
 
 _SETTLEMENT_BODY = (
     "Invoice {invoice_id} for {amount} is {days} days past due.\n\n"
     "To close this without further escalation, we can accept "
-    "{settlement_amount} -- a {discount_pct:g}% reduction -- if it is paid "
-    "against the link below. This offer applies to this invoice only:"
+    "{settlement_amount} -- a {discount_pct:g}% reduction. This offer applies "
+    "to this invoice only."
+)
+
+#: The two endings. Which one is used is the only thing the presence of a
+#: payment link changes about the copy.
+_LINK_CTA = "You can settle it here:"
+_NO_LINK_CTA = (
+    "This amount is above the limit our payment links support, so please reply "
+    "to this email and we will send you bank transfer details."
 )
 
 _SIGN_OFF = (
@@ -114,8 +125,9 @@ def _body_template(intent: ExecutionIntent) -> str:
 def render(intent: ExecutionIntent, link: PaymentLink | None) -> RenderedMessage:
     """Compose the message for this intent.
 
-    ``link`` is optional only so that a payment-link failure can still produce
-    a message for the failed-attempt record. A delivered message always has one.
+    ``link`` may be ``None`` in two cases: an invoice over the payment-link cap,
+    which is still sent, and a link failure, which is only rendered so the
+    failed attempt has a body recorded against it.
     """
 
     invoice = intent.case.invoice
@@ -131,6 +143,8 @@ def render(intent: ExecutionIntent, link: PaymentLink | None) -> RenderedMessage
     subject = _subject(intent)
     pay_url = link.url if link is not None else ""
     pay_label = f"Pay {format_inr(intent.payable_amount)}"
+
+    body = f"{body}\n\n{_LINK_CTA if pay_url else _NO_LINK_CTA}"
 
     text_parts = [_greeting(intent), "", body, ""]
     if pay_url:

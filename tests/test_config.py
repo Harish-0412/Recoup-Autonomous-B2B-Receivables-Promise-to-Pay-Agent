@@ -33,6 +33,9 @@ MANAGED = (
     "RAZORPAY_WEBHOOK_SECRET",
     "RESEND_API_KEY",
     "RESEND_FROM_EMAIL",
+    "RESEND_WEBHOOK_SECRET",
+    "REPLY_INBOUND_DOMAIN",
+    "REPLY_ADDRESS_SECRET",
 )
 
 #: A fully configured production environment, used as the baseline the
@@ -45,6 +48,9 @@ REAL_PRODUCTION = {
     "RAZORPAY_WEBHOOK_SECRET": "whsec_live_value",
     "RESEND_API_KEY": "re_live_value",
     "RESEND_FROM_EMAIL": "billing@recoup.in",
+    "RESEND_WEBHOOK_SECRET": "whsec_live_inbound",
+    "REPLY_INBOUND_DOMAIN": "reply.recoup.in",
+    "REPLY_ADDRESS_SECRET": "a-real-reply-signing-key",
 }
 
 
@@ -133,6 +139,10 @@ def test_production_refuses_placeholder_secrets(build):
         ("DATABASE_URL", "postgresql://user:password@localhost:5432/recoup"),
         ("RAZORPAY_KEY_ID", "rzp_test_xxxxxxxxxxxxxxxx"),
         ("RESEND_FROM_EMAIL", "noreply@yourdomain.com"),
+        # Added with the reply loop: an unsigned reply address means anyone who
+        # guesses the format can record a promise against any invoice.
+        ("REPLY_ADDRESS_SECRET", "change-me-reply-address-secret"),
+        ("REPLY_INBOUND_DOMAIN", "reply.yourdomain.com"),
     ],
 )
 def test_one_leftover_placeholder_is_enough_to_refuse(build, field, placeholder):

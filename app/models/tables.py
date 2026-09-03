@@ -41,6 +41,7 @@ from app.models.enums import (
     EscalationState,
     InvoiceStatus,
     PromiseStatus,
+    ReplyDisposition,
 )
 from src.ml.versioning import utc_now
 
@@ -285,3 +286,64 @@ class WebhookEvent(Base):
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     processing_error: Mapped[str | None] = mapped_column(Text, default=None)
+
+
+class InboundReply(Base):
+    """One customer reply, what the classifier made of it, and what followed.
+
+    Every inbound reply lands here, including the ones nothing was done with.
+    That is the point: "the agent ignored what the customer said" is exactly
+    the accusation this table has to be able to answer, and it can only answer
+    it if the unhandled replies are stored too.
+
+    ``disposition`` is the review queue. A reply the classifier was not
+    confident about is written with ``NEEDS_REVIEW`` and *no* promise, rather
+    than a guessed promise -- a fabricated commitment stops the agent chasing a
+    live debt, which is worse than asking a person.
+    """
+
+    __tablename__ = "inbound_replies"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    #: The provider's message id, which is also the idempotency key.
+    reply_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+
+    #: Nullable: a reply can arrive that we cannot match to an invoice, and
+    #: dropping it would be the one outcome worse than queueing it.
+    invoice_pk: Mapped[int | None] = mapped_column(
+        ForeignKey("invoices.id"), default=None, index=True
+    )
+    customer_pk: Mapped[int | None] = mapped_column(
+        ForeignKey("customers.id"), default=None, index=True
+    )
+
+    from_email: Mapped[str] = mapped_column(String(320), default="")
+    to_email: Mapped[str] = mapped_column(String(320), default="")
+    subject: Mapped[str] = mapped_column(String(255), default="")
+    body: Mapped[str] = mapped_column(Text, default="")
+
+    intent: Mapped[str] = mapped_column(String(64), default="")
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    classifier_version: Mapped[str] = mapped_column(String(64), default="")
+    #: True when the classifier could not run and a fallback answered instead.
+    fallback_used: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    disposition: Mapped[ReplyDisposition] = mapped_column(
+        _enum(ReplyDisposition, "reply_disposition"),
+        default=ReplyDisposition.NEEDS_REVIEW,
+        index=True,
+    )
+    #: Why it was queued, or what was done with it. Human-readable on purpose:
+    #: this is the line a reviewer reads first.
+    disposition_reason: Mapped[str] = mapped_column(Text, default="")
+
+    promise_pk: Mapped[int | None] = mapped_column(ForeignKey("promises.id"), default=None)
+
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+    @property
+    def needs_review(self) -> bool:
+        return self.disposition is ReplyDisposition.NEEDS_REVIEW
