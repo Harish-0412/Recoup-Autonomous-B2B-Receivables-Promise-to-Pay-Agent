@@ -646,7 +646,7 @@ def _inr_group(value: int) -> str:
         grouped = text
     else:
         head, tail = text[:-3], text[-3:]
-        parts = []
+        parts: list[str] = []
         while len(head) > 2:
             parts.insert(0, head[-2:])
             head = head[:-2]

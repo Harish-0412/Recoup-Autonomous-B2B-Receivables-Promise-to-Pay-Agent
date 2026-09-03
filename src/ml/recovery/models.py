@@ -23,6 +23,7 @@ well-ranked is not good enough -- 0.7 has to mean 0.7.
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -33,6 +34,9 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from src.ml.features.recovery_features import FEATURE_COLUMNS_V1
+
+if TYPE_CHECKING:  # pragma: no cover - annotation only
+    from xgboost import XGBClassifier
 
 BASELINE_NAME = "logreg-recovery"
 PRIMARY_NAME = "xgb-recovery"
@@ -102,7 +106,7 @@ def build_logistic_regression(seed: int = 42) -> Pipeline:
     )
 
 
-def build_gradient_boosting(seed: int = 42, *, n_estimators: int = 400):
+def build_gradient_boosting(seed: int = 42, *, n_estimators: int = 400) -> "XGBClassifier":
     """XGBoost, tuned conservatively for a few thousand rows.
 
     Shallow trees and a low learning rate: the dataset is small enough that a
