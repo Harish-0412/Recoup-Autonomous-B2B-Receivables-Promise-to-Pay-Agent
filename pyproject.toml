@@ -16,12 +16,19 @@ dependencies = [
     "httpx==0.28.1",
     "razorpay==1.4.1",
     "resend==2.42.0",
-    "groq==0.6.0",
+    "groq==1.7.0",
     "google-generativeai==0.8.3",
     "python-multipart==0.0.12",
     "email-validator==2.2.0",
     "python-json-logger==2.0.7",
     "structlog==24.4.0",
+    # --- agent loop ---
+    # instructor: validated, retry-on-failure structured LLM output.
+    # transitions: the escalation ladder FSM, with guards enforced by the library.
+    # business-rules: policy rules defined as data rather than nested ifs.
+    "instructor>=1.16",
+    "transitions>=0.9",
+    "business-rules>=1.1",
     # --- ML ---
     "scikit-learn>=1.4",
     "xgboost>=2.0",
@@ -93,6 +100,11 @@ module = [
     "razorpay.*",
     "google.*",
     "google.generativeai.*",
+    "resend.*",
+    "groq.*",
+    "transitions.*",
+    "business_rules.*",
+    "instructor.*",
 ]
 ignore_missing_imports = true
 
