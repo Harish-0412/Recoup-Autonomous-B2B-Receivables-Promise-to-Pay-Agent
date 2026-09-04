@@ -1,4 +1,4 @@
-from functools import lru_cache
+﻿from functools import lru_cache
 from typing import Literal
 
 from pydantic import Field, model_validator
@@ -11,6 +11,11 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="ignore",
+        # CRITICAL FIX: Ignore empty strings from environment variables.
+        # When Vercel/Render set empty env vars for unconfigured optional
+        # secrets, we fall back to defaults instead of failing to parse.
+        # This allows production deploys with partial configuration.
+        env_ignore_empty=True,
     )
 
     # Application
@@ -202,6 +207,24 @@ class Settings(BaseSettings):
     #: (ingest + both webhooks). Process-local; a multi-replica deploy
     #: should put a shared limiter (Redis) in front. See app/core/ratelimit.py.
     RATE_LIMIT_PER_MINUTE: int = Field(default=60, ge=1, le=1000)
+    #: Shared rate-limiter Redis URL (redis[s]://user:pass@host:port/db).
+    #: When unset, ``check_allowed`` falls back to the in-process deque.
+    #: Opt-in so a deploy without Redis behaves exactly like today.
+    RATE_LIMIT_REDIS_URL: str | None = Field(
+        default=None,
+        description="Redis URL for shared sliding-window rate limiter",
+    )
+    #: OTLP HTTP endpoint for OpenTelemetry traces (e.g. Grafana Cloud Tempo
+    #: gateway). Unset disables network export; traces go to stdout JSON only.
+    OTEL_EXPORTER_OTLP_ENDPOINT: str | None = Field(
+        default=None,
+        description="OTLP HTTP exporter endpoint for Grafana Cloud / Tempo",
+    )
+    #: OTel service name. Grafana TraceQL filters by this, so keep it stable.
+    OTEL_SERVICE_NAME: str = Field(
+        default="recoup",
+        description="OpenTelemetry service.name resource attribute",
+    )
     #: Single-tenant identifier, reserved for the future multi-tenant path.
     #: v1 is deliberately single-tenant (see docs/tenancy.md); this value is
     #: recorded on batch-run records and surfaced in /tasks/status so a later
@@ -217,8 +240,10 @@ class Settings(BaseSettings):
     DRIFT_ALERT_EMAIL: str = Field(default="")
     #: Most invoices one triggered run may touch. A cron that fires while the
     #: previous run is still going should find a bounded amount of work, not a
-    #: whole book.
-    BATCH_MAX_INVOICES: int = Field(default=200, gt=0)
+    #: whole book. Calibrated by the Wave 6 load test (docs/load_test.md): the
+    #: 30s wall-p95 SLO breaks at N ~= 2400 open invoices, so the cap sits at
+    #: 80% of that. Do not raise it without a new measured pass.
+    BATCH_MAX_INVOICES: int = Field(default=1920, gt=0)
 
     #: The kill switch. Set to false and every outbound message stops, with no
     #: redeploy and no code change. Deliberately separate from ``DRY_RUN``:
@@ -229,6 +254,49 @@ class Settings(BaseSettings):
     SENDING_ENABLED: bool = Field(
         default=True,
         description="Master switch for all outbound contact",
+    )
+
+    # ---------------------------------------------------------------------------
+    # Wave 2: ERP Integration Settings
+    # ---------------------------------------------------------------------------
+
+    # Zoho Books OAuth2
+    ZOHO_CLIENT_ID: str = Field(
+        default="",
+        description="Zoho OAuth2 client ID (from Zoho API Console)",
+    )
+    ZOHO_CLIENT_SECRET: str = Field(
+        default="",
+        description="Zoho OAuth2 client secret",
+    )
+    ZOHO_REDIRECT_URI: str = Field(
+        default="http://localhost:8000/api/v1/integrations/zoho/connect",
+        description="OAuth2 redirect URI registered in Zoho API Console",
+    )
+
+    # QuickBooks Online OAuth2 (Intuit)
+    QBO_CLIENT_ID: str = Field(
+        default="",
+        description="QuickBooks Online Intuit OAuth2 client ID",
+    )
+    QBO_CLIENT_SECRET: str = Field(
+        default="",
+        description="QuickBooks Online Intuit OAuth2 client secret",
+    )
+    QBO_REDIRECT_URI: str = Field(
+        default="http://localhost:8000/api/v1/integrations/quickbooks/connect",
+        description="OAuth2 redirect URI registered in Intuit Developer Console",
+    )
+    QBO_ENVIRONMENT: str = Field(
+        default="sandbox",
+        description='QuickBooks environment: "sandbox" or "production"',
+    )
+
+    # ERP sync behaviour
+    ERP_SYNC_LOOKBACK_DAYS: int = Field(
+        default=90,
+        ge=1,
+        description="How many days of overdue invoices to pull on each ERP sync",
     )
 
     @property
@@ -288,6 +356,18 @@ class Settings(BaseSettings):
         unset = [
             name for name, marker in placeholders.items() if marker in str(getattr(self, name, ""))
         ]
+        # TASK_API_KEY guards the run-batch endpoint, which sends real email.
+        # An empty value, the word ``change-me``, or the literal field name all
+        # mean "nobody set this yet" and must refuse to boot in production.
+        task_key = str(self.TASK_API_KEY or "")
+        if task_key in ("", "TASK_API_KEY") or "change-me" in task_key.lower():
+            unset.append("TASK_API_KEY")
+        # Reply understanding needs at least one LLM path. Refusing when both
+        # are unset turns "no model configured" into a failed release instead
+        # of a production deploy that routes every reply to human review
+        # because no one noticed the key was missing.
+        if not self.GROQ_API_KEY and not self.GEMINI_API_KEY:
+            unset.append("LLM keys (GROQ_API_KEY or GEMINI_API_KEY)")
         if unset:
             raise ValueError(
                 "APP_ENV=production but these still hold placeholder values: "
@@ -329,3 +409,4 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
