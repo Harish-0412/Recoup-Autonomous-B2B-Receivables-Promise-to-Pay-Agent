@@ -27,6 +27,7 @@ from app.models import (
     Customer,
     DecisionTrace,
     DeliveryStatus,
+    EscalationState,
     InboundReply,
     Invoice,
     InvoiceStatus,
@@ -88,6 +89,83 @@ async def list_open_invoices(session: AsyncSession, *, limit: int = 500) -> list
         .limit(limit)
     )
     return list(result.scalars().all())
+
+
+# ---------------------------------------------------------------------------
+# Paginated list for the work queue
+# ---------------------------------------------------------------------------
+
+
+async def list_invoices_paginated(
+    session: AsyncSession,
+    *,
+    status: InvoiceStatus | None = None,
+    escalation_state: EscalationState | None = None,
+    customer_search: str | None = None,
+    only_open: bool = True,
+    page: int = 1,
+    page_size: int = 50,
+    sort_by: str = "expected_value",
+    sort_desc: bool = True,
+) -> tuple[list[Invoice], int]:
+    """Paginated, filterable invoice list plus the queue page needs.
+
+    Supports filtering by status, escalation state, and a free-text customer name
+    match. Sorting by ``expected_value`` requires the *caller* to
+    post-compute and reorder results -- the ORM columns we trust enough to do here are
+    ``outstanding``, ``due_date``, ``invoice_id``, and ``customer_name``.
+
+    ``only_open`` defaults to True because "the MSME collections user lives in open
+    invoices day-to-day; ``/invoices only exposes everything when a user needs to find a
+    specific closed case or an archived payment; the caller controls the default.
+    """
+
+    page = max(page, 1)
+    page_size = min(max(page_size, 1), 200)
+
+    stmt = select(Invoice).join(Customer, Customer.id == Invoice.customer_pk)
+
+    if only_open and status is None:
+        stmt = stmt.where(
+            Invoice.status.in_(
+                [InvoiceStatus.OPEN, InvoiceStatus.IN_PROGRESS, InvoiceStatus.PROMISED]
+            )
+        )
+    elif status is not None:
+        stmt = stmt.where(Invoice.status == status)
+
+    if escalation_state is not None:
+        stmt = stmt.where(Invoice.escalation_state == escalation_state)
+
+    if customer_search:
+        pattern = f"%{customer_search.strip()}%"
+        stmt = stmt.where(
+            (Customer.name.ilike(pattern))
+            | (Customer.customer_id.ilike(pattern))
+            | (Invoice.invoice_id.ilike(pattern))
+        )
+
+    count_stmt = select(func.count(func.distinct(Invoice.id)))
+    total_rows = await session.execute(count_stmt.select_from(stmt.subquery()))
+    total = int(total_rows.scalar_one())
+
+    safe_column = {
+        "outstanding": Invoice.amount - Invoice.amount_paid,
+        "amount": Invoice.amount,
+        "due_date": Invoice.due_date,
+        "invoice_id": Invoice.invoice_id,
+        "issue_date": Invoice.issue_date,
+    }.get(sort_by)
+    if safe_column is not None:
+        stmt = stmt.order_by(
+            safe_column.desc() if sort_desc else safe_column.asc())
+    else:
+        stmt = stmt.order_by((Invoice.amount - Invoice.amount_paid).desc())
+
+    stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+    result = await session.execute(stmt)
+    rows: list[Invoice] = list(result.scalars().unique().all())
+    return rows, total
 
 
 async def active_opt_out_channels(

@@ -15,9 +15,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from app.core.policy import PolicyEngine, policy_config_from_settings
+from app.schemas.policy import PolicySimulateIn, PolicySimulateOut
 
 router = APIRouter(prefix="/policy", tags=["policy"])
 
@@ -39,3 +40,30 @@ async def get_policy() -> dict[str, Any]:
         ),
     }
     return description
+
+
+@router.post("/simulate", response_model=PolicySimulateOut)
+async def simulate_policy(payload: PolicySimulateIn) -> PolicySimulateOut:
+    """Counterfactual replay of a policy change. Not yet implemented.
+
+    The contract above is the design: proposed overrides plus a replay window
+    in, baseline vs simulated metrics plus the affected-case list out. The
+    engine itself -- re-running ``run_cycle`` over decision-trace snapshots
+    with swapped ceilings -- does not exist yet, so this answers 501 rather
+    than a fabricated simulation. Request validation still runs first, so a
+    422 here means the *contract* rejected the body, which is exactly what the
+    frontend studio builds against.
+    """
+
+    _ = payload
+    raise HTTPException(
+        status_code=501,
+        detail={
+            "status": "not_implemented",
+            "reason": (
+                "The counterfactual replay engine is not built yet. "
+                "See docs/architecture.md section 7 for the design. "
+                "The /simulate studio page runs in labelled preview mode until then."
+            ),
+        },
+    )

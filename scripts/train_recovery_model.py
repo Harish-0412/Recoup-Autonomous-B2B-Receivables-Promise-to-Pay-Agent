@@ -258,6 +258,69 @@ def main(argv: list[str] | None = None) -> int:
     report_path = args.out / "evaluation_report.json"
     report_path.write_text(json.dumps(report, indent=2, default=str) + "\n", encoding="utf-8")
     print(f"wrote {report_path}")
+
+    # --- studio artifact ------------------------------------------------------
+    # The small JSON the GET /models/recovery/card endpoint serves. Same
+    # numbers as above, reshaped once here so the API never recomputes them.
+    shipped_bins = [
+        {
+            "lower": b.lower,
+            "upper": b.upper,
+            "count": b.count,
+            "predicted": b.mean_predicted,
+            "observed": b.observed_rate,
+            "gap": round(b.mean_predicted - b.observed_rate, 6),
+        }
+        for b in best.calibration_bins
+        if b.count >= 15
+    ]
+    card = {
+        "model_version": report.get("model_version"),
+        "shipped_model": best.model_name,
+        "threshold": args.threshold,
+        "calibration": args.calibration,
+        "test_rows": best.rows,
+        "results": [
+            {
+                "model": m.model_name,
+                "auc": m.roc_auc,
+                "average_precision": m.average_precision,
+                "precision": m.precision,
+                "recall": m.recall,
+                "f1": m.f1,
+                "brier": m.brier_score,
+                "ece": m.expected_calibration_error,
+                "shipped": m.model_name == best.model_name,
+            }
+            for m in [rules_metrics, *test_metrics]
+        ],
+        "calibration_bins": shipped_bins,
+        "head_to_head": {
+            "challenger": comparison.challenger,
+            "incumbent": comparison.incumbent,
+            "challenger_auc": comparison.challenger_auc,
+            "incumbent_auc": comparison.incumbent_auc,
+            "auc_delta": comparison.auc_delta,
+            "challenger_brier": comparison.challenger_brier,
+            "incumbent_brier": comparison.incumbent_brier,
+            "challenger_value_at_risk_at_k": comparison.challenger_value_at_risk_at_k,
+            "incumbent_value_at_risk_at_k": comparison.incumbent_value_at_risk_at_k,
+            "value_delta": round(
+                comparison.challenger_value_at_risk_at_k
+                - comparison.incumbent_value_at_risk_at_k,
+                2,
+            ),
+            "k": comparison.k,
+            "top_fraction": 0.2,
+        },
+        "global_importance": [
+            {"feature": name, "mean_abs_shap": value, "direction": ""}
+            for name, value in list(importance)[:10]
+        ],
+    }
+    card_path = args.out / "model_card.json"
+    card_path.write_text(json.dumps(card, indent=2, default=str) + "\n", encoding="utf-8")
+    print(f"wrote {card_path}")
     return 0
 
 

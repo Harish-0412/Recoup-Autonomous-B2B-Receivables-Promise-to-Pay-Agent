@@ -245,9 +245,9 @@ export function DecisionCycleRunner() {
                 <Activity className="h-4 w-4" />
                 <span>DECISION CYCLE VERDICT</span>
               </div>
-              {result?.decision && (
+              {result && (
                 <span className="px-2.5 py-1 rounded-lg text-xs font-mono font-bold uppercase bg-zinc-900 text-white dark:bg-white dark:text-black">
-                  {result.decision.outcome}
+                  {result.tier}
                 </span>
               )}
             </div>
@@ -261,14 +261,14 @@ export function DecisionCycleRunner() {
               <>
                 <div className="space-y-3">
                   <h4 className="text-xl font-bold text-zinc-950 dark:text-white tracking-tight font-mono">
-                    {result?.decision?.outcome === "wait"
+                    {result?.tier === "WAIT"
                       ? "PASS (SUPPRESS CONTACT — GOODWILL PROTECTION)"
-                      : result?.decision?.outcome === "escalate"
-                      ? `ESCALATE TO ${result.decision.ladder_step.toUpperCase().replace(/_/g, " ")}`
+                      : result?.tier
+                      ? `${result.tier} TO ${(result.ladder_step || "").toUpperCase().replace(/_/g, " ")}`
                       : "AUTONOMOUS POLICY VERDICT"}
                   </h4>
                   <p className="text-zinc-700 dark:text-zinc-300 text-sm leading-relaxed">
-                    {result?.decision?.reason || "Evaluating case snapshot against policy engine..."}
+                    {result?.decision?.reason || result?.rationale || "Evaluating case snapshot against policy engine..."}
                   </p>
                 </div>
 
@@ -276,10 +276,11 @@ export function DecisionCycleRunner() {
                 {result?.execution && (
                   <div className="p-4 rounded-xl bg-white dark:bg-black/60 border border-zinc-200 dark:border-white/10 space-y-3 shadow-inner">
                     <div className="flex items-center justify-between text-xs font-mono">
-                      <span className="text-zinc-500">Outbound Channel:</span>
+                      <span className="text-zinc-500">Execution:</span>
                       <span className="font-semibold text-zinc-900 dark:text-white flex items-center gap-1">
                         <Mail className="h-3.5 w-3.5 text-orange-500" />
-                        {result.execution.channel.toUpperCase()} (Resend SDK)
+                        {result.execution.status.toUpperCase()}
+                        {result.execution.dry_run ? " · DRY_RUN" : ""} (Resend SDK)
                       </span>
                     </div>
 
@@ -311,15 +312,15 @@ export function DecisionCycleRunner() {
                   </div>
                 )}
 
-                {/* Cryptographic Trace Checksum */}
-                {result?.trace_entry && (
+                {/* Transition + Trace link */}
+                {result && (
                   <div className="p-4 rounded-xl bg-emerald-500/5 border border-emerald-500/20 font-mono text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div>
                       <span className="text-zinc-500 block text-[10px] uppercase font-bold">
-                        Decision Trace Checksum (SHA-256):
+                        Transition: {result.state_before} → {result.state_after} · EV {(result.expected_value ?? 0).toLocaleString("en-IN")}
                       </span>
                       <span className="text-emerald-600 dark:text-emerald-400 font-bold truncate block max-w-sm">
-                        {result.trace_entry.entry_hash}
+                        {result.reason}
                       </span>
                     </div>
                     <button

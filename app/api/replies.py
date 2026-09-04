@@ -53,6 +53,11 @@ from app.models import (
     ReplyDisposition,
     WebhookEvent,
 )
+from app.schemas.models import (
+    ClassifyPreviewEntities,
+    ClassifyPreviewIn,
+    ClassifyPreviewOut,
+)
 from app.schemas.replies import ReplyIngestResponse, ReplyReviewItem, ReplyReviewQueue
 from app.services import repository
 from app.services.reply_routing import resolve_from_recipients, verify_svix_signature
@@ -391,6 +396,72 @@ async def _process(
         classifier_version=reply.classifier_version,
         disposition=reply.disposition.value,
         reason=extracted.message,
+    )
+
+
+@router.post("/classify-preview", response_model=ClassifyPreviewOut)
+async def classify_preview(payload: ClassifyPreviewIn) -> ClassifyPreviewOut:
+    """Classify one reply text without any side effects.
+
+    A thin wrapper around the same ``understand_reply`` path the ingestion
+    pipeline uses -- same cascade, same guard, same extractors -- minus
+    everything mutating: no signature verification, no DB write, no promise
+    creation, no opt-out recorded. Built for the Reply Understanding Studio's
+    try-it-yourself box, where a judge mashing the button must never move
+    money, create records, or silence a real customer.
+    """
+
+    import uuid
+
+    from src.ml.reply.classifier import MODEL_NAME as STAGE_C_NAME
+    from src.ml.schemas import FallbackResolver
+
+    text = payload.text.strip()
+    prediction = await understand_reply(
+        text,
+        payload.invoice_id,
+        f"preview-{uuid.uuid4().hex[:8]}",
+        invoice_context={"invoice_id": payload.invoice_id},
+        settings=MLSettings(),
+    )
+
+    if looks_like_opt_out(text):
+        stage_used = "guard"
+    elif not prediction.fallback_used and prediction.model_used == STAGE_C_NAME:
+        stage_used = "cascade"
+    else:
+        stage_used = "llm"
+
+    entities = prediction.entities
+    # The guard is the decision, not a suggestion: a matched opt-out is binding
+    # even when the classifier underneath fell back, mirroring ingestion where
+    # the guard path records the opt-out without consulting confidence.
+    needs_review = (
+        False
+        if stage_used == "guard"
+        else bool(
+            prediction.fallback_used
+            and prediction.fallback is not None
+            and prediction.fallback.resolved_by is FallbackResolver.HUMAN_REVIEW_QUEUE
+        )
+    )
+
+    return ClassifyPreviewOut(
+        intent=prediction.intent.value,
+        confidence=prediction.confidence,
+        entities=ClassifyPreviewEntities(
+            promised_amount=entities.promised_amount,
+            promised_date=entities.promised_date.isoformat()
+            if entities.promised_date is not None
+            else None,
+            currency=entities.currency,
+            dispute_reason=entities.dispute_reason,
+        ),
+        stage_used=stage_used,
+        classifier_version=prediction.model_version,
+        fallback_used=prediction.fallback_used,
+        needs_review=needs_review,
+        explanation=prediction.explanation,
     )
 
 

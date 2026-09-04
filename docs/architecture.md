@@ -266,6 +266,25 @@ itself repeats:
 | [SetFit](https://github.com/huggingface/setfit) | LLM reply baseline | Needs labelled replies that do not exist yet |
 | [SDV](https://github.com/sdv-dev/SDV) | archetype generator | Current generator works and is tested |
 | [MABWiser](https://github.com/fidelity/mabwiser) | fixed contact cadence | Phase 11 stretch: contextual bandit for contact timing |
+| Policy Simulation Engine (counterfactual replay) | live policy tuning by gut feel | The standout differentiator, not yet built — contract first |
+
+### Policy Simulation Engine — the planned standout
+
+The question a CFO actually asks before touching a ceiling: *"if we raise the
+discount ceiling from 10% to 15%, what happens to recovery, false
+interventions, and violations over last quarter's book?"* The engine answers it
+by re-running `run_cycle` over stored decision-trace snapshots with the
+proposed `PolicyConfig` swapped in — same scorer, same ladder, different gate —
+and diffing the outcome. Nothing is sent; the replay reads the ledger the audit
+trail already writes, which is why the hash-chained trace and the eventsourcing
+upgrade above are prerequisites, not side quests.
+
+The contract ships before the engine: `POST /policy/simulate` accepts the
+overrides plus a replay window (`app/schemas/policy.py`) and returns baseline
+vs simulated metrics plus the affected-case list. Until the engine lands the
+endpoint answers 501, and the `/simulate` studio page runs in a labelled
+preview mode against that same contract — parallel development without faking
+results.
 
 Plus the non-library work named in the README: multi-tenant auth, WhatsApp
 delivery once verification clears, a trained and calibrated recovery model with

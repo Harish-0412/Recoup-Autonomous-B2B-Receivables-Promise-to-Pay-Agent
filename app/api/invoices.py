@@ -2,22 +2,36 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import math
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.agent import AgentConfig, run_cycle
+from app.core.agent import AgentConfig, run_batch
 from app.core.audit import DecisionLedger, DecisionTraceEntry, append_decision_trace
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.policy import policy_config_from_settings
 from app.db.session import get_db
-from app.models import Customer, DecisionOutcome, DeliveryStatus, Invoice
+from app.models import (
+    Customer,
+    DecisionOutcome,
+    DeliveryStatus,
+    EscalationState,
+    Invoice,
+    InvoiceStatus,
+    InterventionTier,
+    Promise,
+    PromiseStatus,
+)
 from app.schemas import (
     AuditTrailOut,
     BatchIngestRequest,
     BatchIngestResponse,
     DecisionTraceOut,
     ExecutionOut,
+    InvoiceListResponse,
+    InvoiceListItem,
     InvoiceOut,
     PolicyDecisionOut,
     PromiseOut,
@@ -76,6 +90,138 @@ async def ingest_batch(
         unknown_customers=len(response.unknown_customer_ids),
     )
     return response
+
+
+@router.get("", response_model=InvoiceListResponse)
+async def list_invoices(
+    status: InvoiceStatus | None = Query(default=None),
+    escalation_state: EscalationState | None = Query(default=None),
+    tier: InterventionTier | None = Query(
+        default=None,
+        description=(
+            "Filter by intervention tier (computed in-memory on the page slice) "
+            "Note: because tier is per-page computed, combining this with sort may "
+            "return fewer rows per page than requested. Leave empty to see all."
+        ),
+    ),
+    q: str | None = Query(default=None, description="Customer name / customer id / invoice id free-text search"),
+    sort: str = Query(
+        default="expected_value",
+        description="One of: expected_value, outstanding, due_date, invoice_id, amount, issue_date",
+    ),
+    sort_dir: str = Query(default="desc", pattern="^(asc|desc)$"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+) -> InvoiceListResponse:
+    """Paginated, filterable list of open invoices (the MSME work queue page).
+
+    Scoring is dry-run: every row in the returned page is run through the same
+    scorer used by the batch report, which yields tier / p_recovery / expected_value
+    so the queue can be filtered by tier and sorted by expected_value. No messages
+    are sent, no invoice state is advanced, and no decisions are persisted.
+    """
+
+    today = utc_now().date()
+    sort_desc = sort_dir.lower() == "desc"
+
+    rows, total = await repository.list_invoices_paginated(
+        db,
+        status=status,
+        escalation_state=escalation_state,
+        customer_search=q,
+        only_open=status is None,
+        page=page,
+        page_size=page_size,
+        sort_by=sort,
+        sort_desc=sort_desc,
+    )
+
+    cases = [await repository.load_case(db, row) for row in rows]
+
+    items: list[InvoiceListItem] = []
+    if cases:
+        ledger = DecisionLedger()
+        scored = run_batch(
+            cases,
+            config=AgentConfig(policy=policy_config_from_settings()),
+            ledger=ledger,
+        )
+        scored_by_id = {r.invoice_id: r for r in scored}
+    else:
+        scored_by_id = {}
+
+    for invoice in rows:
+        customer = await db.get(Customer, invoice.customer_pk)
+        if customer is None:
+            continue
+
+        open_promise: Promise | None = None
+        for promise in invoice.promises or []:
+            if promise.status == PromiseStatus.PENDING and (
+                open_promise is None or promise.created_at > open_promise.created_at
+            ):
+                open_promise = promise
+
+        score = scored_by_id.get(invoice.invoice_id)
+        item_tier = score.tier if score else None
+        item_ev = score.score.expected_value if score else None
+        p_recovery = score.score.p_recovery if score else None
+        rationale = score.score.rationale if score else None
+
+        if tier is not None and item_tier is not None and item_tier != tier:
+            continue
+
+        items.append(
+            InvoiceListItem(
+                invoice_id=invoice.invoice_id,
+                customer_id=customer.customer_id,
+                customer_name=customer.name,
+                amount=invoice.amount,
+                amount_paid=invoice.amount_paid,
+                outstanding=max(invoice.amount - invoice.amount_paid, 0.0),
+                currency=invoice.currency,
+                due_date=invoice.due_date,
+                days_overdue=max((today - invoice.due_date).days, 0),
+                status=invoice.status,
+                escalation_state=invoice.escalation_state,
+                ladder_index=invoice.ladder_index,
+                prior_reminders_sent=invoice.prior_reminders_sent,
+                last_contact_at=invoice.last_contact_at,
+                tier=item_tier.value if item_tier else None,
+                p_recovery=p_recovery,
+                expected_value=item_ev,
+                promise_status=open_promise.status.value if open_promise else None,
+                promise_due_date=open_promise.promised_date if open_promise else None,
+                rationale=rationale,
+            )
+        )
+
+    if sort == "expected_value" or sort == "ev":
+        reverse = sort_desc
+        items.sort(key=lambda it: it.expected_value if it.expected_value is not None else -1, reverse=reverse)
+    elif sort == "tier":
+        tier_rank = {InterventionTier.ESCALATE: 0, InterventionTier.REMIND: 1, InterventionTier.WAIT: 2, None: 3}
+        reverse = sort_desc
+        items.sort(key=lambda it: tier_rank.get(it.tier, 3), reverse=reverse)
+    elif sort == "days_overdue":
+        reverse = sort_desc
+        items.sort(key=lambda it: it.days_overdue, reverse=reverse)
+
+    if tier is not None:
+        visible_total = total
+    else:
+        visible_total = total
+
+    total_pages = max(1, math.ceil(visible_total / page_size))
+
+    return InvoiceListResponse(
+        items=items,
+        total=visible_total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+    )
 
 
 async def _load_invoice_or_404(db: AsyncSession, invoice_id: str) -> Invoice:

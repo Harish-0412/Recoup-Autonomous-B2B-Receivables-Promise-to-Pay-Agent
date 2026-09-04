@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import uuid
 from typing import Any
+
 from eventsourcing.domain import Aggregate, event
 
 

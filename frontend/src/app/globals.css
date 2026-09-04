@@ -59,3 +59,17 @@ body {
 .dark ::-webkit-scrollbar-thumb:hover {
   background: #3f3f46;
 }
+
+/* SplitText animation classes */
+.split-parent {
+  display: block;
+}
+.split-word {
+  display: inline-block;
+  margin-right: 0.28em;
+  will-change: transform, opacity;
+}
+.split-char {
+  display: inline-block;
+  will-change: transform, opacity;
+}

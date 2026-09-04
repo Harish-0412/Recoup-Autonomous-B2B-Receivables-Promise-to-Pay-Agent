@@ -17,6 +17,7 @@ from sqlalchemy import text
 from app import models as _models  # noqa: F401
 from app.api.health import router as health_router
 from app.api.invoices import router as invoices_router
+from app.api.models import router as models_router
 from app.api.policy import router as policy_router
 from app.api.replies import router as replies_router
 from app.api.reports import router as reports_router
@@ -90,6 +91,7 @@ app.add_middleware(
 
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(invoices_router, prefix="/api/v1")
+app.include_router(models_router, prefix="/api/v1")
 app.include_router(webhooks_router, prefix="/api/v1")
 app.include_router(reports_router, prefix="/api/v1")
 app.include_router(policy_router, prefix="/api/v1")

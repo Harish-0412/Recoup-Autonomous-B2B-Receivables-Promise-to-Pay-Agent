@@ -1,6 +1,7 @@
 """Tests for the pyeventsourcing domain aggregate, application, and time-travel replay."""
 
-from datetime import datetime, UTC
+from datetime import UTC, datetime
+
 import pytest
 
 from app.core.audit import DecisionTraceEntry

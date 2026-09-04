@@ -18,6 +18,7 @@ from app.models.enums import (
     EscalationState,
     InterventionTier,
     InvoiceStatus,
+    PromiseStatus,
 )
 
 
@@ -122,6 +123,50 @@ class InvoiceOut(BaseModel):
     payment_link_url: str | None = None
     paid_at: datetime | None = None
     promises: list[PromiseOut] = Field(default_factory=list)
+
+
+class InvoiceListItem(BaseModel):
+    """One row in the paginated work-queue list.
+
+    Adds the tier/p_recovery/expected_value fields the queue page needs, by running
+    the same scorer used by the batch report but dry-run and only on the
+    page-sized slice -- no state is persisted and nothing is sent.
+    """
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    invoice_id: str
+    customer_id: str
+    customer_name: str
+    amount: float
+    amount_paid: float
+    outstanding: float
+    currency: str
+    due_date: date
+    days_overdue: int
+    status: InvoiceStatus
+    escalation_state: EscalationState
+    ladder_index: int
+    prior_reminders_sent: int
+    last_contact_at: datetime | None = None
+    tier: InterventionTier | None = None
+    p_recovery: float | None = None
+    expected_value: float | None = None
+    promise_status: PromiseStatus | str | None = None
+    promise_due_date: date | None = None
+    rationale: str | None = None
+
+
+class InvoiceListResponse(BaseModel):
+    """Paginated list of invoices for the work queue page."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    items: list[InvoiceListItem]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
 
 
 class DecisionTraceOut(BaseModel):

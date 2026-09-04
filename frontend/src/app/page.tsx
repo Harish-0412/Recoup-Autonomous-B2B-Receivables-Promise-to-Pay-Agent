@@ -1,12 +1,14 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import Link from "next/link";
 import { useTheme } from "next-themes";
 import { Preloader } from "@/components/ui/preloader";
 import { FluidMorphBg } from "@/components/ui/fluid-morph-bg";
 import { AnimatedFooter } from "@/components/ui/animated-footer";
 import { ExpandableBentoGrid, BentoItem } from "@/components/ui/expandable-bento-grid";
 import { GlassDock, DockItem } from "@/components/ui/glass-dock";
+import { SplitText } from "@/components/ui/split-text";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowRight,
@@ -32,6 +34,7 @@ import {
   Server,
   Users2,
   UserCheck,
+  LayoutDashboard,
   Sun,
   Moon
 } from "lucide-react";
@@ -54,6 +57,7 @@ export default function Home() {
   // Single Floating Dock placed at the bottom of the screen
   const dockItems: DockItem[] = [
     { title: "Home", href: "#hero" },
+    { title: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
     { title: "Services", icon: Layers, href: "#services" },
     { title: "Simulator", icon: Workflow, href: "#simulator" },
     { title: "Review Desk", icon: UserCheck, href: "#review" },
@@ -250,47 +254,68 @@ export default function Home() {
           )}
         </AnimatePresence>
 
-        {/* Single Floating Glass Dock At Bottom Center */}
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center justify-center">
-          <GlassDock items={dockItems} />
-        </div>
+        {/* Single Floating Glass Dock At Bottom Center - Only visible after Preloader completes */}
+        <AnimatePresence>
+          {!showPreloader && (
+            <motion.div
+              initial={{ opacity: 0, y: 40, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 40 }}
+              transition={{ duration: 0.7, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
+              className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center justify-center pointer-events-auto"
+            >
+              <GlassDock items={dockItems} />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-        {/* Hero Section */}
-        <section id="hero" className="relative pt-20 pb-20 md:pt-28 md:pb-28 overflow-hidden">
-          {/* Subtle Ambient Backdrops */}
-          <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[700px] h-[450px] bg-gradient-to-b from-orange-500/15 via-amber-500/5 to-transparent blur-[140px] pointer-events-none rounded-full" />
-          <div className="absolute top-10 left-1/4 w-[250px] h-[250px] bg-orange-600/10 blur-[100px] pointer-events-none" />
+        {/* Smooth Landing Page Entry Wrapper - Fades and glides in after preloader */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{
+            opacity: showPreloader ? 0 : 1,
+            y: showPreloader ? 20 : 0,
+          }}
+          transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1] }}
+          className="relative z-10"
+        >
+          {/* Hero Section */}
+          <section id="hero" className="relative pt-20 pb-20 md:pt-28 md:pb-28 overflow-hidden">
+            {/* Subtle Ambient Backdrops */}
+            <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[700px] h-[450px] bg-gradient-to-b from-orange-500/15 via-amber-500/5 to-transparent blur-[140px] pointer-events-none rounded-full" />
+            <div className="absolute top-10 left-1/4 w-[250px] h-[250px] bg-orange-600/10 blur-[100px] pointer-events-none" />
 
-          <div className="mx-auto max-w-7xl px-6 relative z-10">
-            <div className="text-center max-w-4xl mx-auto">
-              <motion.div
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6 }}
-                className="flex flex-wrap items-center justify-center gap-3 mb-8"
-              >
-                <div className="inline-flex items-center gap-2 rounded-full border border-orange-500/30 bg-orange-500/10 px-4 py-1.5 text-xs font-medium text-orange-600 dark:text-orange-400">
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-orange-500"></span>
-                  </span>
-                  Autonomous B2B Receivables & Promise-to-Pay Agent
+            <div className="mx-auto max-w-7xl px-6 relative z-10">
+              <div className="text-center max-w-4xl mx-auto">
+                <motion.div
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.6 }}
+                  className="flex flex-wrap items-center justify-center gap-3 mb-8"
+                >
+                  <div className="inline-flex items-center gap-2 rounded-full border border-orange-500/30 bg-orange-500/10 px-4 py-1.5 text-xs font-medium text-orange-600 dark:text-orange-400">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-orange-500"></span>
+                    </span>
+                    Autonomous B2B Receivables & Promise-to-Pay Agent
+                  </div>
+                  <BackendStatusBadge />
+                </motion.div>
+
+                <div className="mb-8 max-w-4xl mx-auto">
+                  <SplitText
+                    text="An AI agent that chases overdue invoices, knows when to stop, and proves what it recovered."
+                    tag="h1"
+                    className="text-4xl sm:text-6xl lg:text-7xl font-semibold tracking-tight leading-[1.12] text-zinc-950 dark:text-white"
+                    splitType="words"
+                    delay={35}
+                    duration={1.0}
+                    textAlign="center"
+                    highlightWords={["knows", "when", "to", "stop"]}
+                    highlightClassName="text-orange-500 dark:text-orange-400 font-bold"
+                  />
                 </div>
-                <BackendStatusBadge />
-              </motion.div>
-
-              <motion.h1
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.7, delay: 0.1 }}
-                className="text-4xl sm:text-6xl lg:text-7xl font-semibold tracking-tight leading-[1.08] mb-8 text-zinc-950 dark:text-white"
-              >
-                An AI agent that chases overdue invoices,{" "}
-                <span className="bg-gradient-to-r from-orange-500 via-amber-500 to-orange-600 dark:from-orange-400 dark:via-amber-300 dark:to-orange-500 bg-clip-text text-transparent">
-                  knows when to stop
-                </span>
-                , and proves what it recovered.
-              </motion.h1>
 
               <motion.p
                 initial={{ opacity: 0, y: 20 }}
@@ -310,13 +335,13 @@ export default function Home() {
                 transition={{ duration: 0.7, delay: 0.3 }}
                 className="flex flex-col sm:flex-row items-center justify-center gap-4"
               >
-                <a
-                  href="#simulator"
+                <Link
+                  href="/dashboard"
                   className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 px-7 py-3.5 text-sm font-semibold text-black hover:opacity-95 transition-all shadow-lg shadow-orange-500/20"
                 >
                   Explore Agent Decision Loop
                   <ArrowRight className="h-4 w-4" />
-                </a>
+                </Link>
                 <a
                   href="#services"
                   className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-300 dark:border-white/15 bg-zinc-100/80 dark:bg-white/5 px-7 py-3.5 text-sm font-medium text-zinc-800 dark:text-white hover:bg-zinc-200 dark:hover:bg-white/10 transition-all"
@@ -357,9 +382,17 @@ export default function Home() {
           <div className="mx-auto max-w-7xl px-6">
             <div className="max-w-3xl mb-14">
               <h2 className="text-xs font-bold uppercase tracking-widest text-orange-600 dark:text-orange-400 mb-3">The Problem We Solve</h2>
-              <p className="text-3xl sm:text-4xl font-semibold tracking-tight text-zinc-950 dark:text-white mb-4">
-                Why generic reminder bots destroy enterprise client trust.
-              </p>
+              <div className="mb-4">
+                <SplitText
+                  text="Why generic reminder bots destroy enterprise client trust."
+                  tag="h2"
+                  className="text-3xl sm:text-4xl font-semibold tracking-tight text-zinc-950 dark:text-white"
+                  splitType="words"
+                  delay={35}
+                  duration={1.0}
+                  textAlign="left"
+                />
+              </div>
               <p className="text-zinc-600 dark:text-zinc-400 text-base leading-relaxed">
                 The average Indian SME carries <strong className="text-zinc-900 dark:text-zinc-200">₹3.83 crore</strong> in overdue receivables. 
                 Finance teams waste dozens of hours manual-dunning spreadsheets or configuring mindless automated bots that treat dependable clients like defaulters.
@@ -432,9 +465,17 @@ export default function Home() {
           <div className="mx-auto max-w-7xl px-6">
             <div className="text-center max-w-3xl mx-auto mb-16">
               <h2 className="text-xs font-bold uppercase tracking-widest text-orange-600 dark:text-orange-400 mb-3">Our Core Autonomous Services</h2>
-              <p className="text-3xl sm:text-5xl font-semibold tracking-tight text-zinc-950 dark:text-white mb-4">
-                What Recoup Actually Does
-              </p>
+              <div className="mb-4">
+                <SplitText
+                  text="What Recoup Actually Does"
+                  tag="h2"
+                  className="text-3xl sm:text-5xl font-semibold tracking-tight text-zinc-950 dark:text-white"
+                  splitType="words"
+                  delay={35}
+                  duration={1.0}
+                  textAlign="center"
+                />
+              </div>
               <p className="text-zinc-600 dark:text-zinc-400 text-base">
                 A purpose-built autonomous system spanning discovery, policy enforcement, transactional execution, and cryptographic auditability.
               </p>
@@ -456,9 +497,17 @@ export default function Home() {
                   </h2>
                   <BackendStatusBadge />
                 </div>
-                <p className="text-3xl sm:text-4xl font-semibold tracking-tight text-zinc-950 dark:text-white">
-                  The Decision Cycle in Real-Time
-                </p>
+                <div className="mb-2">
+                  <SplitText
+                    text="The Decision Cycle in Real-Time"
+                    tag="h2"
+                    className="text-3xl sm:text-4xl font-semibold tracking-tight text-zinc-950 dark:text-white"
+                    splitType="words"
+                    delay={35}
+                    duration={1.0}
+                    textAlign="left"
+                  />
+                </div>
                 <p className="text-zinc-600 dark:text-zinc-400 text-sm mt-1 max-w-3xl">
                   Inspect how Recoup evaluates recovery probability with SHAP drivers, enforces deterministic policy gates, executes via Razorpay/Resend, and anchors decisions in cryptographic hash chains.
                 </p>
@@ -476,9 +525,17 @@ export default function Home() {
               <h2 className="text-xs font-bold uppercase tracking-widest text-orange-600 dark:text-orange-400 mb-3">
                 Promise-to-Pay Watchdog
               </h2>
-              <p className="text-3xl font-semibold tracking-tight text-zinc-950 dark:text-white mb-2">
-                Human Supervisor Clearance Queue
-              </p>
+              <div className="mb-2">
+                <SplitText
+                  text="Human Supervisor Clearance Queue"
+                  tag="h2"
+                  className="text-3xl font-semibold tracking-tight text-zinc-950 dark:text-white"
+                  splitType="words"
+                  delay={35}
+                  duration={1.0}
+                  textAlign="left"
+                />
+              </div>
               <p className="text-zinc-600 dark:text-zinc-400 text-sm">
                 When customer replies contain ambiguous payment commitments or disputes requiring manual discretion, the agent halts automatic collection and routes them directly to the human review desk.
               </p>
@@ -493,9 +550,17 @@ export default function Home() {
           <div className="mx-auto max-w-7xl px-6">
             <div className="text-center max-w-3xl mx-auto mb-16">
               <h2 className="text-xs font-bold uppercase tracking-widest text-orange-600 dark:text-orange-400 mb-3">Enterprise Impact</h2>
-              <p className="text-3xl sm:text-5xl font-semibold tracking-tight text-zinc-950 dark:text-white mb-4">
-                How Your Organization Benefits
-              </p>
+              <div className="mb-4">
+                <SplitText
+                  text="How Your Organization Benefits"
+                  tag="h2"
+                  className="text-3xl sm:text-5xl font-semibold tracking-tight text-zinc-950 dark:text-white"
+                  splitType="words"
+                  delay={35}
+                  duration={1.0}
+                  textAlign="center"
+                />
+              </div>
               <p className="text-zinc-600 dark:text-zinc-400 text-base">
                 Tailored advantages across Finance, Executive Leadership, and Collections Operations.
               </p>
@@ -656,9 +721,17 @@ export default function Home() {
           <div className="mx-auto max-w-7xl px-6">
             <div className="text-center max-w-3xl mx-auto mb-16">
               <h2 className="text-xs font-bold uppercase tracking-widest text-orange-600 dark:text-orange-400 mb-3">Honest Benchmark Evidence</h2>
-              <p className="text-3xl sm:text-5xl font-semibold tracking-tight text-zinc-950 dark:text-white mb-4">
-                What Success Looks Like in Numbers
-              </p>
+              <div className="mb-4">
+                <SplitText
+                  text="What Success Looks Like in Numbers"
+                  tag="h2"
+                  className="text-3xl sm:text-5xl font-semibold tracking-tight text-zinc-950 dark:text-white"
+                  splitType="words"
+                  delay={35}
+                  duration={1.0}
+                  textAlign="center"
+                />
+              </div>
               <p className="text-zinc-600 dark:text-zinc-400 text-base">
                 Direct results from our verified 600-invoice batch simulation run. We report false interventions rather than hiding them.
               </p>
@@ -720,7 +793,9 @@ export default function Home() {
             rightImage="/animated-footer/hand-right.jpg"
           />
         </section>
+        </motion.div>
       </main>
+
     </>
   );
 }
