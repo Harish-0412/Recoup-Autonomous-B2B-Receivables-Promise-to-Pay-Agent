@@ -1,0 +1,63 @@
+customer_id,name,industry,preferred_channel,tenure_months,invoice_count,avg_invoice_amount,on_time_ratio_90d,on_time_ratio_all_time,avg_days_late,prior_broken_promises_count,prior_disputes_count
+CUS-0001,Nova Exports Pvt Ltd,construction materials,email,45,8,70442.6,0.3327,0.5247,32.67,2,1
+CUS-0002,Vaibhav Traders Industries Ltd,pharma distribution,whatsapp,91,69,80058.79,1.0,0.9027,3.13,1,4
+CUS-0003,Sagar Enterprises LLP,IT services,whatsapp,50,66,79430.96,0.8161,0.9672,4.14,0,1
+CUS-0004,Sunrise Technologies & Co,electronics retail,email,54,30,105054.04,0.8334,0.9617,0.0,1,1
+CUS-0005,Ganesh Exports Pvt Ltd,IT services,email,60,44,76211.83,1.0,0.9764,1.34,0,1
+CUS-0006,Vaibhav Logistics Pvt Ltd,logistics,email,41,73,72219.95,0.8638,0.8819,1.03,1,2
+CUS-0007,Trident Exports LLP,pharma distribution,whatsapp,59,72,309769.88,1.0,0.9761,1.23,2,1
+CUS-0008,Vertex Enterprises & Co,packaging,whatsapp,37,54,55408.24,0.936,0.9645,0.74,2,0
+CUS-0009,Rajdhani Fabricators Industries Ltd,logistics,email,53,24,52613.32,0.7293,0.8123,4.12,1,0
+CUS-0010,Krishna Industries Industries Ltd,packaging,whatsapp,85,77,288658.55,1.0,0.9692,2.25,1,3
+CUS-0011,Vishwa Technologies & Co,IT services,whatsapp,77,74,187867.95,0.9084,0.9946,1.83,1,2
+CUS-0012,Vishwa Distributors LLP,packaging,email,4,0,93696.61,1.0,0.5383,5.07,0,0
+CUS-0013,Shree Traders Pvt Ltd,pharma distribution,whatsapp,80,38,168904.12,0.5063,0.8926,17.21,2,4
+CUS-0014,Vertex Distributors LLP,packaging,email,79,33,106460.52,0.9171,0.9677,15.72,4,5
+CUS-0015,Sagar Traders & Co,textiles,email,0,3,242784.92,0.0,0.6209,2.59,1,1
+CUS-0016,Bharat Industries LLP,logistics,email,54,27,53729.04,0.5418,0.2885,20.41,2,3
+CUS-0017,Sundaram Fabricators LLP,pharma distribution,email,54,14,133419.62,0.8262,0.9678,0.37,0,0
+CUS-0018,Nova Agencies & Co,logistics,email,14,27,67158.82,0.1256,0.3839,36.49,5,5
+CUS-0019,Anand Fabricators Industries Ltd,electronics retail,whatsapp,68,42,226507.9,0.3256,0.2637,16.33,2,2
+CUS-0020,Konark Industries Pvt Ltd,construction materials,whatsapp,60,11,119589.95,0.2107,0.1898,16.09,1,1
+CUS-0021,Sunrise Industries Pvt Ltd,logistics,whatsapp,65,45,226948.11,0.2497,0.3352,23.34,1,1
+CUS-0022,Deccan Enterprises LLP,logistics,email,53,16,112184.78,1.0,0.9151,4.82,0,0
+CUS-0023,Rajdhani Solutions Pvt Ltd,agri inputs,email,95,61,202785.24,1.0,0.8916,2.46,0,1
+CUS-0024,Sagar Agencies Pvt Ltd,FMCG distribution,email,0,2,187020.08,0.3582,0.8859,16.87,0,1
+CUS-0025,Vaibhav Agencies LLP,IT services,email,40,68,270764.35,0.5185,0.4148,23.78,10,3
+CUS-0026,Vishwa Enterprises & Co,IT services,whatsapp,90,76,81995.17,0.8933,0.9623,1.19,1,2
+CUS-0027,Bharat Technologies Pvt Ltd,FMCG distribution,email,28,21,34618.81,1.0,0.985,0.6,0,2
+CUS-0028,Vaibhav Solutions & Co,textiles,whatsapp,18,64,182579.13,1.0,0.9125,2.34,1,1
+CUS-0029,Konark Industries Industries Ltd,FMCG distribution,whatsapp,1,2,18583.54,0.1272,0.3151,0.51,0,0
+CUS-0030,Anand Traders Industries Ltd,packaging,whatsapp,58,62,40719.52,0.1652,0.3066,10.47,4,4
+CUS-0031,Vishwa Agencies Pvt Ltd,IT services,whatsapp,96,79,84609.86,1.0,0.843,3.42,1,5
+CUS-0032,Nova Technologies Pvt Ltd,construction materials,email,32,45,55315.72,0.4264,0.8935,20.0,6,10
+CUS-0033,Bharat Logistics Pvt Ltd,agri inputs,email,20,67,119414.15,1.0,0.9724,4.25,0,2
+CUS-0034,Rajdhani Logistics Pvt Ltd,textiles,email,3,3,53957.09,0.7717,0.6651,10.95,0,0
+CUS-0035,Hindustan Traders Pvt Ltd,pharma distribution,whatsapp,34,61,216805.59,0.4858,0.2783,21.47,2,3
+CUS-0036,Sundaram Logistics Pvt Ltd,textiles,email,15,41,365286.33,0.526,0.8681,20.4,2,4
+CUS-0037,Prime Solutions Pvt Ltd,agri inputs,email,6,44,57170.81,0.502,0.5517,24.17,9,6
+CUS-0038,Anand Solutions Pvt Ltd,IT services,email,62,38,81530.8,0.0,0.0793,18.99,5,8
+CUS-0039,Sunrise Traders Pvt Ltd,packaging,email,37,33,67608.4,0.5407,0.429,11.13,6,6
+CUS-0040,Deccan Enterprises Pvt Ltd,FMCG distribution,whatsapp,59,22,78533.65,0.8032,0.9663,3.09,1,0
+CUS-0041,Rajdhani Exports Pvt Ltd,packaging,whatsapp,32,15,108193.62,0.2252,0.1918,12.61,0,0
+CUS-0042,Anand Logistics Industries Ltd,logistics,email,65,58,242343.67,0.1818,0.2348,22.68,0,0
+CUS-0043,Konark Traders Industries Ltd,textiles,email,57,35,245323.49,0.7273,0.5808,12.34,8,6
+CUS-0044,Ganesh Exports & Co,agri inputs,email,3,0,120819.45,1.0,0.7103,9.2,0,0
+CUS-0045,Shree Distributors Pvt Ltd,construction materials,whatsapp,81,71,71684.86,1.0,0.9477,2.74,1,0
+CUS-0046,Meenakshi Exports & Co,FMCG distribution,email,70,62,81002.76,0.7379,0.9579,1.48,2,1
+CUS-0047,Sagar Logistics Pvt Ltd,pharma distribution,whatsapp,61,41,31309.48,0.3689,0.3465,4.21,1,4
+CUS-0048,Sagar Distributors & Co,pharma distribution,email,88,39,33208.85,0.9812,0.9626,2.55,1,1
+CUS-0049,Ganesh Logistics & Co,construction materials,whatsapp,4,1,41735.92,1.0,0.6045,13.99,0,0
+CUS-0050,Vertex Traders LLP,IT services,email,58,31,87685.04,0.2318,0.3687,21.3,0,2
+CUS-0051,Sagar Exports Pvt Ltd,logistics,whatsapp,66,43,30489.48,0.3839,0.1921,12.67,2,2
+CUS-0052,Vertex Exports Pvt Ltd,auto components,email,15,72,56488.66,0.4663,0.8057,17.42,15,18
+CUS-0053,Vertex Solutions Pvt Ltd,agri inputs,whatsapp,75,65,53579.95,0.3152,0.8487,20.34,7,7
+CUS-0054,Sagar Fabricators Pvt Ltd,agri inputs,email,80,68,82126.07,0.8728,0.7701,2.83,1,2
+CUS-0055,Vaibhav Traders Industries Ltd,FMCG distribution,email,67,78,106053.13,0.9716,0.9801,2.64,1,3
+CUS-0056,Deccan Solutions Industries Ltd,construction materials,email,92,55,208936.89,0.8036,0.9363,2.36,1,2
+CUS-0057,Apex Fabricators & Co,electronics retail,whatsapp,5,0,367374.73,1.0,0.715,22.12,0,0
+CUS-0058,Prime Industries LLP,pharma distribution,email,89,55,138736.8,0.3849,0.8205,11.47,12,4
+CUS-0059,Nova Exports Pvt Ltd,IT services,email,84,68,51086.77,0.244,0.7631,14.15,11,11
+CUS-0060,Shree Industries Pvt Ltd,pharma distribution,whatsapp,77,18,58870.41,1.0,0.8305,0.0,1,0
+CUS-0061,Prime Logistics & Co,agri inputs,email,35,35,17175.59,0.3143,0.298,7.03,6,4
+CUS-0062,Shree Enterprises Pvt Ltd,IT services,whatsapp,23,14,31696.63,0.3574,0.5197,14.3,3,1

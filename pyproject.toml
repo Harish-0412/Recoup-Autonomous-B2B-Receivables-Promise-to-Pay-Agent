@@ -81,6 +81,10 @@ ml = [
     "numpy>=1.26",
     "joblib>=1.3",
     "sdv>=1.38",
+    # xlrd parses the UCI drift-training source (.xls) in
+    # scripts/train_drift_model.py. Training-time only: the API container
+    # never imports it (drift inference loads a joblib artifact).
+    "xlrd>=2.0",
 ]
 
 # Depends on the ml extra on purpose: tests/ml/ imports sklearn, xgboost and

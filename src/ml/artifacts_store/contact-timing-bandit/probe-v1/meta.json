@@ -1,0 +1,12 @@
+{
+  "model_name": "contact-timing-bandit",
+  "model_version": "probe-v1",
+  "trained_at": "2026-09-04T13:20:47.310117Z",
+  "train_rows": 0,
+  "feature_columns": [
+    "segment",
+    "arm"
+  ],
+  "metrics": {},
+  "notes": "segmented Thompson Sampling, contact-timing-v1"
+}

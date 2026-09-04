@@ -98,6 +98,7 @@ class PromiseOut(BaseModel):
     status: str
     created_at: datetime
     resolved_at: datetime | None = None
+    broken_promise_score: float | None = None
 
 
 class InvoiceOut(BaseModel):
@@ -234,6 +235,21 @@ class ExecutionOut(BaseModel):
     error: str | None = None
 
 
+class MLWorkflowStep(BaseModel):
+    """Step-by-step trace of how an ML model or gate evaluated this case."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    id: str
+    name: str
+    model_type: str
+    status: str
+    verdict: str
+    score: float | None = None
+    score_label: str | None = None
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
 class RunCycleResponse(BaseModel):
     """The full, explainable result of one decision cycle."""
 
@@ -264,3 +280,16 @@ class RunCycleResponse(BaseModel):
     #: ``None`` means nothing was sent, and says so rather than leaving the
     #: caller to infer it from the tier.
     execution: ExecutionOut | None = None
+
+    # Unified ML features validation and workflow trace
+    timing_arm: str | None = None
+    timing_expected_rate: float | None = None
+    timing_scheduled_for: str | None = None
+    timing_fallback: bool = False
+    drift_flagged: bool | None = None
+    drift_score: float | None = None
+    drift_drivers: list[dict[str, Any]] = Field(default_factory=list)
+    broken_promise_score: float | None = None
+    broken_promise_status: str | None = None
+    ml_workflow: list[MLWorkflowStep] = Field(default_factory=list)
+

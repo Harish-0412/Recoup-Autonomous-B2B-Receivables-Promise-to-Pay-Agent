@@ -1,0 +1,14 @@
+{
+  "model_version": "timingbandit-20260904-f35c7d",
+  "train_rows": 10080,
+  "eval_rows": 4320,
+  "eval_customers": 360,
+  "matched_rows": 282,
+  "policy_reward": 0.5035460992907801,
+  "logging_reward": 0.45023148148148145,
+  "lift_over_logging": 0.05331461780929864,
+  "best_fixed_arm": "thu_morning",
+  "best_fixed_arm_reward": 0.5223880597014925,
+  "truth_mae": 0.116671,
+  "seed": 42
+}

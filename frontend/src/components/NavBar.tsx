@@ -12,7 +12,7 @@ const navLinks = [
   { href: '/policy', label: 'Policy' },
   { href: '/reports/batch', label: 'Batch Audit' },
   { href: '/runs', label: 'Runs' },
-  { href: '/models/recovery', label: 'Models' },
+  { href: '/models', label: 'Models' },
   { href: '/simulate', label: 'Simulate' },
 ];
 

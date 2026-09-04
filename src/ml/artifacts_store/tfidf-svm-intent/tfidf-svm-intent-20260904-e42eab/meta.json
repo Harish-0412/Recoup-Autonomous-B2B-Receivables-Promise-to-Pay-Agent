@@ -1,0 +1,13 @@
+{
+  "model_name": "tfidf-svm-intent",
+  "model_version": "tfidf-svm-intent-20260904-e42eab",
+  "trained_at": "2026-09-04T14:14:06.378523Z",
+  "train_rows": 823,
+  "feature_columns": [
+    "word12-charwb35-v1"
+  ],
+  "metrics": {
+    "macro_f1": 0.73
+  },
+  "notes": "round-trip test"
+}

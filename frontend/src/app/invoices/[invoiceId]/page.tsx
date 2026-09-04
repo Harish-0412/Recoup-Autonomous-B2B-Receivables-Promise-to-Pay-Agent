@@ -22,11 +22,18 @@ import {
 import {
   fetchInvoiceDetail,
   runInvoiceCycle,
+  fetchCustomerDrift,
+  fetchNextContactTime,
   type InvoiceOut,
   type PromiseOut,
   type RunCycleResponse,
+  type DriftFlag,
+  type NextTimeSuggestion,
 } from "@/lib/api";
 import { DecisionCycleVisualizer } from "@/components/case/DecisionCycleVisualizer";
+import { MLWorkflowTrace } from "@/components/ml/MLWorkflowTrace";
+import { MLContextStrip } from "@/components/ml/MLContextStrip";
+import { BrokenPromiseRiskBadge } from "@/components/BrokenPromiseRiskBadge";
 import { cn } from "@/lib/utils";
 
 const LADDER = ["monitoring", "reminded", "escalated", "human_handoff", "closed"] as const;
@@ -113,6 +120,28 @@ export default function CaseFilePage({ params }: { params: Promise<{ invoiceId: 
   const [cycleRunning, setCycleRunning] = useState(false);
   const [cycleResult, setCycleResult] = useState<RunCycleResponse | null>(null);
   const [cycleError, setCycleError] = useState<string | null>(null);
+
+  // Read-only ML backdrop for this customer: drift verdict + bandit send
+  // window. Fetched once per invoice, never mutates anything.
+  const [drift, setDrift] = useState<DriftFlag | null | undefined>(undefined);
+  const [timing, setTiming] = useState<NextTimeSuggestion | null | undefined>(undefined);
+
+  useEffect(() => {
+    const customerId = invoice?.customer_id;
+    if (!customerId) return;
+    let active = true;
+    setDrift(undefined);
+    setTiming(undefined);
+    fetchCustomerDrift(customerId)
+      .then((d) => active && setDrift(d))
+      .catch(() => active && setDrift(null));
+    fetchNextContactTime(customerId)
+      .then((t) => active && setTiming(t))
+      .catch(() => active && setTiming(null));
+    return () => {
+      active = false;
+    };
+  }, [invoice?.customer_id]);
 
   const handleRunCycle = async () => {
     setCycleRunning(true);
@@ -237,12 +266,17 @@ export default function CaseFilePage({ params }: { params: Promise<{ invoiceId: 
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {invoice.promises.map((p) => (
-                    <div key={p.promise_id} className={cn("rounded-xl border border-zinc-200 dark:border-white/10 border-l-4 bg-zinc-50/60 dark:bg-black p-4 space-y-1.5", promiseBorder(p.status))}>
-                      <div className="flex items-center justify-between">
+                    <div key={p.promise_id} className={cn("rounded-xl border border-zinc-200 dark:border-white/10 border-l-4 bg-zinc-50/60 dark:bg-black p-4 space-y-2.5", promiseBorder(p.status))}>
+                      <div className="flex items-center justify-between flex-wrap gap-2">
                         <span className="font-mono text-xs font-bold">{p.promise_id}</span>
-                        <span className={cn("text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border", promiseBadge(p.status))}>
-                          {p.status}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className={cn("text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border", promiseBadge(p.status))}>
+                            {p.status}
+                          </span>
+                          {p.broken_promise_score !== undefined && p.broken_promise_score !== null && (
+                            <BrokenPromiseRiskBadge score={p.broken_promise_score} showBar={true} />
+                          )}
+                        </div>
                       </div>
                       <p className="text-lg font-extrabold">
                         {p.currency} {Number(p.promised_amount).toLocaleString("en-IN")} <span className="text-xs font-normal text-zinc-500">by {p.promised_date}</span>
@@ -275,9 +309,20 @@ export default function CaseFilePage({ params }: { params: Promise<{ invoiceId: 
                   className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold bg-gradient-to-r from-orange-500 to-amber-500 text-black shadow-lg shadow-orange-500/20 disabled:opacity-60"
                 >
                   {cycleRunning ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4 fill-current" />}
-                  {cycleRunning ? "Running…" : "Run Decision Cycle"}
+                  {cycleRunning ? "Running…" : cycleResult ? "Re-run Decision Cycle" : "Run Decision Cycle"}
                 </button>
               </div>
+
+              <MLContextStrip
+                drift={drift}
+                timing={timing}
+                brokenPromiseScore={
+                  invoice.promises.find((p) => p.status === "PENDING")?.broken_promise_score ?? null
+                }
+                promiseStatus={
+                  invoice.promises.find((p) => p.status === "PENDING")?.status ?? null
+                }
+              />
 
               {cycleError && (
                 <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-xs font-mono flex items-center gap-2">
@@ -287,6 +332,12 @@ export default function CaseFilePage({ params }: { params: Promise<{ invoiceId: 
 
               {(cycleResult || cycleRunning) && (
                 <DecisionCycleVisualizer result={cycleResult} running={cycleRunning} />
+              )}
+
+              {cycleResult && !cycleRunning && cycleResult.ml_workflow && cycleResult.ml_workflow.length > 0 && (
+                <div className="rounded-xl border border-zinc-200 dark:border-white/10 bg-white dark:bg-black p-4">
+                  <MLWorkflowTrace steps={cycleResult.ml_workflow} />
+                </div>
               )}
 
               {cycleResult && !cycleRunning && (

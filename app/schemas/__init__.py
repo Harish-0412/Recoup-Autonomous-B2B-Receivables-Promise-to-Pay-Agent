@@ -41,3 +41,6 @@ from app.schemas.replies import (  # noqa: E402
 )
 
 __all__ += ["ReplyIngestResponse", "ReplyReviewItem", "ReplyReviewQueue"]
+from app.schemas.drift import DriftDriverOut, DriftFlagListOut, DriftFlagOut  # noqa: E402
+
+__all__ += ["DriftDriverOut", "DriftFlagListOut", "DriftFlagOut"]

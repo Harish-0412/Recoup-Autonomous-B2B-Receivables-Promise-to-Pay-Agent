@@ -1,0 +1,14 @@
+{
+  "model_name": "contact-timing-bandit",
+  "model_version": "test-v1",
+  "trained_at": "2026-09-04T13:20:33.782459Z",
+  "train_rows": 0,
+  "feature_columns": [
+    "segment",
+    "arm"
+  ],
+  "metrics": {
+    "online_updates": 1.0
+  },
+  "notes": " +online"
+}

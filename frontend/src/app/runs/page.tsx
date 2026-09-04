@@ -45,6 +45,7 @@ import {
   type RunInvoiceDecision,
   type TaskStatusResponse,
 } from "@/lib/api";
+import { MLWorkflowTrace } from "@/components/ml/MLWorkflowTrace";
 import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -1288,6 +1289,56 @@ export default function RunsPage() {
                                       <p className="text-zinc-600 dark:text-zinc-400 mt-0.5">
                                         {dec.rationale}
                                       </p>
+                                    </div>
+
+                                    {/* ML validation trace: full 6-step workflow when the
+                                        run recorded it, flat-field fallback for older runs */}
+                                    <div className="rounded-xl border border-zinc-200/70 dark:border-white/10 bg-zinc-50/50 dark:bg-white/[0.02] p-3.5">
+                                      <MLWorkflowTrace
+                                        steps={dec.ml_workflow ?? []}
+                                        variant="compact"
+                                      />
+                                      {(!dec.ml_workflow || dec.ml_workflow.length === 0) && (
+                                        <div className="flex flex-wrap gap-2 mt-2">
+                                          {dec.timing_arm && (
+                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-sky-500/10 text-sky-700 dark:text-sky-300 border border-sky-500/20">
+                                              <Clock className="w-3 h-3" />
+                                              {dec.timing_arm.replace("_", " ")}
+                                              {dec.timing_expected_rate != null &&
+                                                ` · ${(dec.timing_expected_rate * 100).toFixed(0)}%`}
+                                              {dec.timing_fallback && " (heuristic)"}
+                                            </span>
+                                          )}
+                                          {dec.drift_flagged != null && (
+                                            <span
+                                              className={cn(
+                                                "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border",
+                                                dec.drift_flagged
+                                                  ? "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20"
+                                                  : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20"
+                                              )}
+                                            >
+                                              <Activity className="w-3 h-3" />
+                                              {dec.drift_flagged
+                                                ? `Drift ${(dec.drift_score ?? 0).toFixed(2)}`
+                                                : "No drift"}
+                                            </span>
+                                          )}
+                                          {dec.broken_promise_score != null && (
+                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20">
+                                              <ShieldAlert className="w-3 h-3" />
+                                              Promise risk {(dec.broken_promise_score * 100).toFixed(0)}%
+                                            </span>
+                                          )}
+                                          <Link
+                                            href={`/invoices/${encodeURIComponent(dec.invoice_id)}`}
+                                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold text-orange-600 dark:text-orange-400 hover:underline"
+                                          >
+                                            Full trace on re-run
+                                            <ExternalLink className="w-3 h-3" />
+                                          </Link>
+                                        </div>
+                                      )}
                                     </div>
 
                                     {dec.decision_allowed === false && dec.violations?.length > 0 && (

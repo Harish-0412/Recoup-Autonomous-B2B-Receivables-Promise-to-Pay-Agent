@@ -15,7 +15,10 @@ from sqlalchemy import text
 # the FastAPI instance. Inside lifespan() that same import would rebind the
 # function's own `app` parameter.
 from app import models as _models  # noqa: F401
+from app.api.broken_promise import router as broken_promise_router
+from app.api.cash_forecast import router as cash_forecast_router
 from app.api.contact_timing import router as contact_timing_router
+from app.api.drift import router as drift_router
 from app.api.health import router as health_router
 from app.api.invoices import router as invoices_router
 from app.api.models import router as models_router
@@ -85,12 +88,18 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
-    allow_credentials=bool(settings.cors_origins),
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|0\.0\.0\.0)(:\d+)?$",
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+app.include_router(broken_promise_router, prefix="/api")
+app.include_router(broken_promise_router, prefix="/api/v1")
+app.include_router(cash_forecast_router, prefix="/api")
+app.include_router(cash_forecast_router, prefix="/api/v1")
 app.include_router(contact_timing_router, prefix="/api/v1")
+app.include_router(drift_router, prefix="/api/v1")
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(invoices_router, prefix="/api/v1")
 app.include_router(models_router, prefix="/api/v1")

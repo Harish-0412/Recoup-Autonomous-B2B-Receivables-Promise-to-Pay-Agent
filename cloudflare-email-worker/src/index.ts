@@ -96,6 +96,12 @@ async function forwardToBackend(
     "svix-signature": svixSignature,
     "x-worker-secret": env.WEBHOOK_SECRET || "",
     "User-Agent": "Recoup-Cloudflare-Email-Worker/1.0",
+    // ngrok's free tier serves an HTML interstitial to anything it takes for a
+    // browser. A JSON POST with the User-Agent above does not trip it today,
+    // but the failure mode if it ever did is a 200 full of HTML that the
+    // backend rejects as malformed JSON -- an expensive thing to debug for a
+    // header that costs nothing. Ignored by every non-ngrok backend.
+    "ngrok-skip-browser-warning": "true",
   };
 
   if (env.LOG_PAYLOAD === "true") {

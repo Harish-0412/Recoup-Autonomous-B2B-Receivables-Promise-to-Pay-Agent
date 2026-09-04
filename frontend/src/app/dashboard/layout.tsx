@@ -70,7 +70,7 @@ export default function DashboardLayout({
     },
     {
       label: "Models",
-      href: "/models/recovery",
+      href: "/models",
       icon: (
         <BrainCircuit className="text-neutral-700 dark:text-neutral-200 h-5 w-5 flex-shrink-0" />
       ),

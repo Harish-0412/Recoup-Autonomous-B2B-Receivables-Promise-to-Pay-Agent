@@ -344,6 +344,11 @@ curl localhost:8000/api/v1/tasks/status -H "Authorization: Bearer $TASK_API_KEY"
 | GET | `/api/v1/tasks/runs/latest` | bearer | Latest run summary |
 | GET | `/api/v1/tasks/runs` | bearer | Run history |
 | GET | `/api/v1/reports/batch` | bearer | In-memory batch report |
+| GET | `/api/v1/forecast/cash` | bearer | Probabilistic 7/30-day cash forecast |
+| GET | `/api/v1/forecast/cash/card` | bearer | Forecast validation (coverage, bias) |
 | GET | `/api/v1/policy` | bearer | Active policy configuration |
 | POST | `/api/v1/policy/simulate` | bearer | Counterfactual replay (501: not built) |
 | GET | `/api/v1/models/recovery/card` | — | Public model evidence |
+| GET | `/api/v1/models/drift/card` | — | Public drift-model evidence |
+| GET | `/api/v1/drift/flags` | bearer | Nightly drift verdicts, newest first |
+| GET | `/api/v1/drift/flags/{customer_id}` | bearer | Latest drift verdict, one customer |

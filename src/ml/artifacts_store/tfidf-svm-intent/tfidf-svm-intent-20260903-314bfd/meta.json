@@ -1,0 +1,17 @@
+{
+  "model_name": "tfidf-svm-intent",
+  "model_version": "tfidf-svm-intent-20260903-314bfd",
+  "trained_at": "2026-09-03T07:57:11.813665Z",
+  "train_rows": 823,
+  "feature_columns": [
+    "word12-charwb35-v1"
+  ],
+  "metrics": {
+    "accuracy": 0.710526,
+    "macro_f1": 0.734623,
+    "weighted_f1": 0.71316,
+    "expected_calibration_error": 0.139982,
+    "cascade_resolution_rate": 0.5263157894736842
+  },
+  "notes": "Trained on reply-intent-corpus-v1 (seed 42), grouped-by-template split."
+}

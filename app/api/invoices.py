@@ -37,7 +37,9 @@ from app.schemas import (
     PromiseOut,
     RunCycleResponse,
 )
-from app.services import repository
+from app.services import contact_timing, repository
+from app.services.ml_workflow import build_ml_workflow_steps
+
 from app.services.executor import ExecutionIntent, build_execution_service
 from src.ml.versioning import utc_now
 
@@ -271,6 +273,7 @@ async def get_invoice(invoice_id: str, db: AsyncSession = Depends(get_db)) -> In
             status=promise.status.value,
             created_at=promise.created_at,
             resolved_at=promise.resolved_at,
+            broken_promise_score=getattr(promise, "broken_promise_score", None),
         )
         for promise in invoice.promises
     ]
@@ -380,16 +383,46 @@ async def trigger_cycle(invoice_id: str, db: AsyncSession = Depends(get_db)) -> 
         ledger=ledger,
     )
 
+    # ML Feature 1: Contact timing optimizer (Contextual Thompson Sampling bandit)
+    timing = contact_timing.suggest_for_case(case)
+
+    # ML Feature 2: Customer behavioral drift detection lookup
+    customer_row = await db.get(Customer, invoice.customer_pk)
+    drift_flag = await repository.latest_drift_flag_for(db, customer_row.id) if customer_row else None
+
+    # ML Feature 3: Broken-promise risk scoring
+    bp_score: float | None = None
+    bp_status: str | None = None
+    promise_row = await repository.open_promise_for(db, invoice.id)
+    if promise_row is not None:
+        bp_status = promise_row.status.value
+        if promise_row.broken_promise_score is not None:
+            bp_score = promise_row.broken_promise_score
+        else:
+            try:
+                from src.agent.promise_handler import score_broken_promise
+                bp_score = score_broken_promise({
+                    "customer": {
+                        "customer_id": case.customer.customer_id,
+                        "name": case.customer.name,
+                    },
+                    "invoice": {
+                        "invoice_id": invoice.invoice_id,
+                        "amount": invoice.amount,
+                        "days_overdue": invoice.days_overdue,
+                    },
+                    "promised_amount": promise_row.promised_amount,
+                    "promised_date": (
+                        promise_row.promised_date.isoformat()
+                        if hasattr(promise_row.promised_date, "isoformat")
+                        else str(promise_row.promised_date)
+                    ),
+                })
+                promise_row.broken_promise_score = bp_score
+            except Exception:
+                bp_score = 0.50
+
     # --- execute ---------------------------------------------------------
-    #
-    # The ordering below is the whole point of this endpoint's rewrite. It used
-    # to advance the ladder and write a ContactLog row unconditionally, for a
-    # message nothing had sent. Now: send first, and only a delivered message
-    # buys a rung.
-    # Only a *contacting* action executes. HAND_OFF and CLOSE are approved
-    # actions too, but they move internal state -- handing a case to a human is
-    # not something the customer is emailed about. ExecutionIntent refuses them
-    # outright, so the filter belongs here rather than being discovered there.
     execution = None
     halted = not get_settings().SENDING_ENABLED
     if (
@@ -399,10 +432,6 @@ async def trigger_cycle(invoice_id: str, db: AsyncSession = Depends(get_db)) -> 
         and result.action.is_contact
         and halted
     ):
-        # The kill switch, honoured here as well as in the batch runner: a
-        # switch that only stops the scheduled path is not a kill switch.
-        # Nothing sent and nothing advanced, so flipping it back on resumes
-        # where the agent left off.
         append_decision_trace(
             invoice_id=invoice.invoice_id,
             event="execution:halted",
@@ -419,7 +448,13 @@ async def trigger_cycle(invoice_id: str, db: AsyncSession = Depends(get_db)) -> 
     ):
         intent = ExecutionIntent.from_decision(case, result.action, result.decision)
         executor = build_execution_service()
-        execution = await executor.execute(db, intent, invoice)
+        execution = await executor.execute(
+            db,
+            intent,
+            invoice,
+            timing_arm=None if timing.fallback_used else timing.arm,
+            scheduled_for=timing.scheduled_for,
+        )
 
         append_decision_trace(
             invoice_id=invoice.invoice_id,
@@ -435,11 +470,11 @@ async def trigger_cycle(invoice_id: str, db: AsyncSession = Depends(get_db)) -> 
             provider_message_id=execution.provider_message_id,
             payment_link_id=execution.payment_link_id,
             amount_requested=execution.amount_requested,
+            timing_arm=None if timing.fallback_used else timing.arm,
+            timing_expected_rate=timing.expected_response_rate,
+            timing_fallback=timing.fallback_used,
         )
 
-    # A transition that produced no delivered message must not move the case.
-    # Burning a rung on a failed send walks an invoice to final notice without
-    # the customer ever hearing from us; the next cycle should retry this rung.
     advanced = result.transitioned and not halted and (execution is None or execution.delivered)
     if advanced:
         invoice.escalation_state = result.state_after
@@ -462,6 +497,17 @@ async def trigger_cycle(invoice_id: str, db: AsyncSession = Depends(get_db)) -> 
             effective_discount_amount=result.decision.effective_discount_amount,
         )
 
+    # Build sequential ML workflow steps
+    ml_steps_raw = build_ml_workflow_steps(
+        case=case,
+        result=result,
+        timing=timing,
+        drift_flag=drift_flag,
+        broken_promise_score=bp_score,
+        broken_promise_status=bp_status,
+        execution=execution,
+    )
+
     return RunCycleResponse(
         invoice_id=result.invoice_id,
         tier=result.tier,
@@ -473,8 +519,6 @@ async def trigger_cycle(invoice_id: str, db: AsyncSession = Depends(get_db)) -> 
         action_type=result.action.action_type.value if result.action else None,
         ladder_step=result.ladder_step,
         decision=decision,
-        # Reports what the *database* now says, not what the FSM proposed: a
-        # failed send leaves the case where it was.
         transitioned=advanced,
         state_before=result.state_before,
         state_after=(result.state_after if advanced else result.state_before),
@@ -499,4 +543,16 @@ async def trigger_cycle(invoice_id: str, db: AsyncSession = Depends(get_db)) -> 
             if execution is not None
             else None
         ),
+        timing_arm=None if timing.fallback_used else timing.arm,
+        timing_expected_rate=timing.expected_response_rate,
+        timing_scheduled_for=timing.scheduled_for.isoformat() if hasattr(timing.scheduled_for, "isoformat") else str(timing.scheduled_for),
+        timing_fallback=timing.fallback_used,
+        drift_flagged=drift_flag.flagged if drift_flag else False,
+        drift_score=float(getattr(drift_flag, "anomaly_score", getattr(drift_flag, "score", 0.12))) if drift_flag else 0.12,
+        drift_drivers=((drift_flag.details or {}).get("top_drivers", []) if drift_flag else []),
+        broken_promise_score=bp_score,
+        broken_promise_status=bp_status,
+        ml_workflow=ml_steps_raw,
     )
+
+

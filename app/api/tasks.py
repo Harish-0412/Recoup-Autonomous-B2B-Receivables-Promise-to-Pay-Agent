@@ -205,6 +205,7 @@ async def task_status(db: AsyncSession = Depends(get_db)) -> dict:
     open_invoices = await repository.list_open_invoices(db, limit=settings.BATCH_MAX_INVOICES)
     pending = await repository.pending_promises(db)
     for_review = await repository.replies_needing_review(db, limit=500)
+    drift_flagged = await repository.count_recently_flagged_customers(db, days=7)
 
     return {
         "business_id": settings.BUSINESS_ID,
@@ -215,4 +216,5 @@ async def task_status(db: AsyncSession = Depends(get_db)) -> dict:
         "open_invoices": len(open_invoices),
         "pending_promises": len(pending),
         "replies_awaiting_review": len(for_review),
+        "customers_flagged_drift_7d": drift_flagged,
     }

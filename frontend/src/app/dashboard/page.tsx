@@ -13,6 +13,8 @@ import KpiCard from "@/components/KpiCard";
 import { RecoveryFunnel } from "@/components/dashboard/RecoveryFunnel";
 import { PriorityQueue } from "@/components/dashboard/PriorityQueue";
 import { HonestyPanel } from "@/components/dashboard/HonestyPanel";
+import { BrokenPromiseWidget } from "@/components/dashboard/BrokenPromiseWidget";
+import { CashForecastWidget } from "@/components/dashboard/CashForecastWidget";
 import { motion, useReducedMotion } from "framer-motion";
 import {
   IndianRupee,
@@ -364,6 +366,14 @@ export default function DashboardPage() {
             </div>
           </>
         )}
+      </div>
+
+      <div className="w-full">
+        <BrokenPromiseWidget />
+      </div>
+
+      <div className="w-full">
+        <CashForecastWidget />
       </div>
 
       <div className="w-full">

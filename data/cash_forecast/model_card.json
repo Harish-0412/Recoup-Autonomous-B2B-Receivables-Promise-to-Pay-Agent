@@ -1,0 +1,57 @@
+{
+  "model_version": "cash-forecast-model-20260904-5e77ef",
+  "attempt": "A",
+  "probability_source": "ModelBasedScorer",
+  "platt_scaler": {
+    "slope": 1.0,
+    "intercept": 0.0
+  },
+  "test_rows": 1272,
+  "test_buckets": 6,
+  "coverage": {
+    "7": 0.6666666666666666,
+    "30": 0.8333333333333334
+  },
+  "bias": {
+    "7": 0.10160326649115975,
+    "30": 0.06424009189323204
+  },
+  "mae": {
+    "7": 1555415.4699999995,
+    "30": 1495675.5083333335
+  },
+  "rmse": {
+    "7": 1957266.7974765184,
+    "30": 2453055.5238950825
+  },
+  "realised_total": {
+    "7": 63115360.77,
+    "30": 106265479.84
+  },
+  "forecast_mean_total": {
+    "7": 69528087.59,
+    "30": 113091984.03
+  },
+  "segments_kept": [
+    "mixed_prompt_clean",
+    "mixed_prompt_flagged",
+    "mixed_slow_clean",
+    "mixed_slow_flagged",
+    "mixed_verylate_flagged",
+    "reliable_prompt_clean",
+    "reliable_prompt_flagged",
+    "reliable_slow_clean",
+    "reliable_slow_flagged",
+    "strained_slow_flagged",
+    "strained_verylate_clean",
+    "strained_verylate_flagged"
+  ],
+  "segments_pooled": [
+    "mixed_verylate_clean",
+    "reliable_verylate_clean",
+    "reliable_verylate_flagged",
+    "strained_prompt_clean",
+    "strained_prompt_flagged",
+    "strained_slow_clean"
+  ]
+}

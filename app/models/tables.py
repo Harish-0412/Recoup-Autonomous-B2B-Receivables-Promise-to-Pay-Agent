@@ -92,6 +92,7 @@ class Customer(Base):
 
     invoices: Mapped[list[Invoice]] = relationship(back_populates="customer")
     opt_outs: Mapped[list[OptOut]] = relationship(back_populates="customer")
+    drift_flags: Mapped[list[CustomerDriftFlag]] = relationship(back_populates="customer")
 
 
 class Invoice(Base):
@@ -164,6 +165,7 @@ class Promise(Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    broken_promise_score: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
 
     invoice: Mapped[Invoice] = relationship(back_populates="promises")
 
@@ -390,3 +392,34 @@ class BatchRunRecord(Base):
     errors: Mapped[list[str]] = mapped_column(JSON, default=list)
     invoice_decisions: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class CustomerDriftFlag(Base):
+    """One nightly drift verdict for one customer.
+
+    Written by ``scripts/run_drift_detection.py``, read by ``GET
+    /api/v1/drift/flags``. A flag is a suggestion that a human look at the
+    customer -- it never changes invoice state, freezes escalation, or
+    sends anything. ``flagged=False`` rows are kept too, so "was this
+    customer checked, and what did the model say" is answerable later.
+    """
+
+    __tablename__ = "customer_drift_flags"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    customer_pk: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
+
+    anomaly_score: Mapped[float] = mapped_column(Float)
+    threshold: Mapped[float] = mapped_column(Float)
+    flagged: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    model_version: Mapped[str] = mapped_column(String(64), default="")
+    #: Trailing window the verdict was computed over, in days.
+    window_days: Mapped[int] = mapped_column(Integer, default=90)
+    #: Feature values and top drivers, for the reviewer who opens the flag.
+    details: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
+
+    customer: Mapped[Customer] = relationship(back_populates="drift_flags")

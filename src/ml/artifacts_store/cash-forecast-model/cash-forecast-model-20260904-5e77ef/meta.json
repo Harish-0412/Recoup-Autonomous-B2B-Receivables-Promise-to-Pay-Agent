@@ -1,0 +1,20 @@
+{
+  "model_name": "cash-forecast-model",
+  "model_version": "cash-forecast-model-20260904-5e77ef",
+  "trained_at": "2026-09-04T13:32:03.201224Z",
+  "train_rows": 3904,
+  "feature_columns": [
+    "amount",
+    "p_recovery",
+    "segment"
+  ],
+  "metrics": {
+    "coverage_7d": 0.6666666666666666,
+    "coverage_30d": 0.8333333333333334,
+    "bias_7d": 0.10160326649115975,
+    "bias_30d": 0.06424009189323204,
+    "mae_30d": 1495675.5083333335,
+    "rmse_30d": 2453055.5238950825
+  },
+  "notes": "attempt A, Platt scaler on validation, temporal split at 2026-03-02/2026-05-18"
+}

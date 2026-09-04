@@ -1,50 +1,29 @@
-# Python
+.env
+.env.*
+!.env.example
+
+.venv/
+venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-.venv/
-venv/
 
-# Local environment
-.env
 *.db
+*.sqlite
 *.sqlite3
 
-# Scratch space: local experiments, temp harnesses, throwaway caches.
-scratch/
-
-# ML artifacts: keep the directory, never commit trained binaries.
-src/ml/artifacts_store/*
-!src/ml/artifacts_store/.gitkeep
-
-# Generated synthetic datasets: reproducible from a seed, never committed.
-data/synthetic/
-
-# Build artifacts
-*.egg-info/
+node_modules/
+.next/
+.wrangler/
 dist/
 build/
 
-# Reply-model evaluation output: regenerate with scripts/train_reply_classifier.py
-data/reply_model/
+*.egg-info/
+src/recoup.egg-info/
 
-# Recovery-model evaluation output: regenerate with scripts/train_recovery_model.py.
-# The committed summary of these numbers lives in docs/recovery_model_card.md.
-data/recovery_model/
-
-# Contact-timing engagement log: regenerate with
-# scripts/generate_contact_timing_data.py. The committed summary of these
-# numbers lives in docs/contact_timing_model_card.md.
-data/contact_timing/
-
-# Coverage output
-.coverage
-coverage.xml
-
-# Cloudflare email worker: dependencies and real local secrets stay out.
-cloudflare-email-worker/node_modules/
 cloudflare-email-worker/.dev.vars
-cloudflare-email-worker/.wrangler/
-cloudflare-email-worker/dist/
+cloudflare-email-worker/.dev.vars.*
+
+scratch/

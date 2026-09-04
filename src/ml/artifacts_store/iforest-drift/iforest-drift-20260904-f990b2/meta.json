@@ -1,0 +1,24 @@
+{
+  "model_name": "iforest-drift",
+  "model_version": "iforest-drift-20260904-f990b2",
+  "trained_at": "2026-09-04T13:10:44.565855Z",
+  "train_rows": 18691,
+  "feature_columns": [
+    "payment_delay_mean",
+    "payment_delay_max",
+    "payment_delay_trend",
+    "delinquent_rate",
+    "pay_ratio_mean",
+    "pay_ratio_trend",
+    "bill_volatility",
+    "utilization",
+    "missed_rate"
+  ],
+  "metrics": {
+    "holdout_flag_rate": 0.16133333333333333,
+    "holdout_normal_flag_rate": 0.10014979670447251,
+    "proxy_lift": 3.1428942608452335,
+    "injected_recall": 0.694
+  },
+  "notes": "iforest-drift on UCI normals, contamination 0.1, threshold +0.0000"
+}

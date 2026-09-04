@@ -1,0 +1,15 @@
+{
+  "model_name": "cash-forecast-model",
+  "model_version": "cash-forecast-model-20260904-d1b562",
+  "trained_at": "2026-09-04T13:42:07.723217Z",
+  "train_rows": 4,
+  "feature_columns": [
+    "amount",
+    "p_recovery",
+    "segment"
+  ],
+  "metrics": {
+    "coverage_30d": 1.0
+  },
+  "notes": "empirical per-segment payment lags + Platt-scaled recovery probabilities"
+}

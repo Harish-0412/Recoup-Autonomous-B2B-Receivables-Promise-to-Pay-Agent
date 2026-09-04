@@ -1,0 +1,74 @@
+{
+  "generator_version": "synthetic-generator-v1",
+  "seed": 42,
+  "horizon_days": 30,
+  "as_of": "2026-09-01",
+  "created_at": "2026-09-04T14:14:17+00:00",
+  "row_counts": {
+    "customers": 150,
+    "invoices": 600,
+    "training_frame": 600,
+    "labels": 600,
+    "reply_seed_examples": 40
+  },
+  "archetype_counts": {
+    "RELIABLE": 47,
+    "LATE_BUT_PAYS": 44,
+    "ERRATIC": 23,
+    "NEW_UNKNOWN": 19,
+    "RISK_ESCALATING": 17
+  },
+  "archetype_mix_configured": {
+    "RELIABLE": 1.95,
+    "LATE_BUT_PAYS": 3.38,
+    "ERRATIC": 1.56,
+    "NEW_UNKNOWN": 1.86,
+    "RISK_ESCALATING": 1.39
+  },
+  "recovery_rate": 0.678333,
+  "training_frame_columns": [
+    "invoice_id",
+    "customer_id",
+    "as_of",
+    "invoice_amount",
+    "invoice_currency",
+    "invoice_issue_date",
+    "invoice_due_date",
+    "invoice_payment_terms_days",
+    "invoice_flagged_date",
+    "invoice_days_overdue_at_flag",
+    "invoice_current_escalation_tier",
+    "invoice_prior_reminders_sent",
+    "invoice_days_since_last_contact",
+    "invoice_has_prior_promise",
+    "invoice_prior_promise_kept",
+    "customer_industry",
+    "customer_preferred_channel",
+    "customer_tenure_months",
+    "customer_invoice_count",
+    "customer_avg_invoice_amount",
+    "customer_on_time_ratio_90d",
+    "customer_on_time_ratio_all_time",
+    "customer_avg_days_late",
+    "customer_prior_broken_promises_count",
+    "customer_prior_disputes_count"
+  ],
+  "label_columns": [
+    "recovered",
+    "recovered_date"
+  ],
+  "excluded_from_training": [
+    "archetype",
+    "true_recovery_probability",
+    "eventual_payment_days",
+    "recovered",
+    "recovered_date"
+  ],
+  "content_sha256": {
+    "customers.csv": "a9fdb22a9bb2cf88f7ec4a9375ee4a2d702d6e596d4a14aeac253c0298378cf3",
+    "invoices.csv": "d650d6ef536e8f54f7610af06dc91642b43bd487a0bb4e103609abae3fdd2d26",
+    "training_frame.csv": "03a9ed9d09fe973b6bf407f954349ba52867026f2ddc1f4d2ab861c55037f44a",
+    "labels.csv": "5a7dbd06f8163d87852977f9ebc73f586fdf5bc0826f73e5f5b0f3f3be206d97",
+    "reply_seed_examples.json": "9c6c4c5639e7ac2d8833781858e364fe9c00cd8163b13dc5097e2b02c3c41f45"
+  }
+}

@@ -7,7 +7,15 @@ compatibility_flags = ["nodejs_compat"]
 [vars]
 # The public URL of your Recoup backend (ngrok, Cloudflare Tunnel, or production domain)
 # IMPORTANT: Omit trailing slash. The worker appends /api/v1/replies automatically.
-BACKEND_URL = "https://your-backend-url.ngrok-free.app"
+#
+# This is the *outbound* hop: worker -> backend. It is unrelated to
+# REPLY_INBOUND_DOMAIN in the backend's .env, which is the domain customers
+# reply TO and must be a real zone on this Cloudflare account with MX records.
+# An ngrok hostname can never serve that role -- it does not receive email.
+#
+# Reserved ngrok domain; start the agent with:
+#   ngrok http 8000 --domain=unsubtly-dollop-drivable.ngrok-free.dev
+BACKEND_URL = "https://unsubtly-dollop-drivable.ngrok-free.dev"
 
 # Set to "true" to log payload previews in `wrangler tail` for debugging
 LOG_PAYLOAD = "false"

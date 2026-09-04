@@ -207,6 +207,14 @@ class Settings(BaseSettings):
     #: recorded on batch-run records and surfaced in /tasks/status so a later
     #: tenancy migration has a stable owner key to split on.
     BUSINESS_ID: str = Field(default="default")
+
+    # Drift detection (nightly job)
+    #: Trailing window the drift scorer aggregates over, in days. Split into
+    #: three equal periods to match the feature schema's trend columns.
+    DRIFT_WINDOW_DAYS: int = Field(default=90, ge=30)
+    #: Operator mailbox for drift alerts. Empty means alerts are rendered and
+    #: logged only -- the nightly job never guesses where to send mail.
+    DRIFT_ALERT_EMAIL: str = Field(default="")
     #: Most invoices one triggered run may touch. A cron that fires while the
     #: previous run is still going should find a bounded amount of work, not a
     #: whole book.

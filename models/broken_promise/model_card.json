@@ -1,0 +1,120 @@
+{
+  "model_name": "broken_promise_risk_scorer",
+  "model_version": "v1.0.0",
+  "algorithm": "Gradient Boosted Trees (LightGBM)",
+  "exported_format": "ONNX (opset 15)",
+  "training_date": "2026-09-04T13:14:25.731082+00:00",
+  "training_rows": 12000,
+  "test_rows": 3000,
+  "feature_count": 19,
+  "features": [
+    "customer_broken_promise_rate",
+    "customer_broken_promises_count",
+    "customer_avg_days_late",
+    "customer_on_time_ratio_90d",
+    "customer_on_time_ratio_all_time",
+    "recency_weighted_on_time_score",
+    "customer_dispute_rate",
+    "customer_invoice_count",
+    "customer_tenure_months",
+    "invoice_amount",
+    "invoice_amount_log",
+    "invoice_amount_vs_customer_avg_ratio",
+    "days_overdue_at_scoring",
+    "payment_terms_days",
+    "days_since_last_contact",
+    "prior_reminders_sent",
+    "promise_amount_ratio",
+    "promise_horizon_days",
+    "current_escalation_tier"
+  ],
+  "metrics": {
+    "roc_auc": 0.8993,
+    "average_precision": 0.8793,
+    "accuracy": 0.819,
+    "precision": 0.8105,
+    "recall": 0.7849,
+    "f1_score": 0.7975,
+    "brier_score": 0.1264
+  },
+  "feature_importances": [
+    {
+      "feature": "days_overdue_at_scoring",
+      "importance": 929
+    },
+    {
+      "feature": "customer_broken_promise_rate",
+      "importance": 693
+    },
+    {
+      "feature": "customer_dispute_rate",
+      "importance": 675
+    },
+    {
+      "feature": "invoice_amount_vs_customer_avg_ratio",
+      "importance": 642
+    },
+    {
+      "feature": "customer_on_time_ratio_all_time",
+      "importance": 635
+    },
+    {
+      "feature": "promise_horizon_days",
+      "importance": 591
+    },
+    {
+      "feature": "customer_on_time_ratio_90d",
+      "importance": 583
+    },
+    {
+      "feature": "customer_avg_days_late",
+      "importance": 581
+    },
+    {
+      "feature": "prior_reminders_sent",
+      "importance": 530
+    },
+    {
+      "feature": "customer_tenure_months",
+      "importance": 494
+    },
+    {
+      "feature": "invoice_amount",
+      "importance": 484
+    },
+    {
+      "feature": "customer_invoice_count",
+      "importance": 427
+    },
+    {
+      "feature": "recency_weighted_on_time_score",
+      "importance": 396
+    },
+    {
+      "feature": "days_since_last_contact",
+      "importance": 253
+    },
+    {
+      "feature": "invoice_amount_log",
+      "importance": 202
+    },
+    {
+      "feature": "customer_broken_promises_count",
+      "importance": 178
+    },
+    {
+      "feature": "promise_amount_ratio",
+      "importance": 104
+    },
+    {
+      "feature": "current_escalation_tier",
+      "importance": 82
+    },
+    {
+      "feature": "payment_terms_days",
+      "importance": 76
+    }
+  ],
+  "onnx_verified": true,
+  "max_onnx_diff": 9.746996734727453e-08
+}

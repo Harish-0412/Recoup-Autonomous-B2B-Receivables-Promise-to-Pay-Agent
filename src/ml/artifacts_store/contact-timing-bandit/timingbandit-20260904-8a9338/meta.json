@@ -1,0 +1,18 @@
+{
+  "model_name": "contact-timing-bandit",
+  "model_version": "timingbandit-20260904-8a9338",
+  "trained_at": "2026-09-04T13:11:21.375716Z",
+  "train_rows": 3780,
+  "feature_columns": [
+    "segment",
+    "arm"
+  ],
+  "metrics": {
+    "policy_reward": 0.47863247863247865,
+    "logging_reward": 0.45987654320987653,
+    "lift_over_logging": 0.01875593542260212,
+    "best_fixed_arm_reward": 0.5196078431372549,
+    "truth_mae": 0.115084
+  },
+  "notes": "segmented Thompson Sampling over 15 send-time arms, grouped split seed=42"
+}

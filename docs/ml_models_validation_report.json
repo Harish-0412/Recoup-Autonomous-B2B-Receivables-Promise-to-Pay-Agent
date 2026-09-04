@@ -1,0 +1,49 @@
+{
+  "razorpay": {
+    "key_id": "rzp_test_TXVM95IjmdDy4d",
+    "signature_verification": "PASSED",
+    "tamper_resistance": "PASSED"
+  },
+  "broken_promise_scorer": {
+    "status": "HEALTHY",
+    "low_risk_score": 0.018,
+    "high_risk_score": 0.9239,
+    "roc_auc": 0.8993,
+    "accuracy": 0.819,
+    "brier_score": 0.1264,
+    "latency_ms": 62.57
+  },
+  "drift_detector": {
+    "status": "HEALTHY",
+    "model_version": "iforest-drift-20260904-f990b2",
+    "flags_evaluated": 10,
+    "lift": 3.14,
+    "injected_drift_recall": 0.694,
+    "flagged_default_rate": 0.517,
+    "unflagged_default_rate": 0.164
+  },
+  "contact_timing_optimizer": {
+    "status": "HEALTHY",
+    "sample_customer": "CUS-0017",
+    "segment": "reliable_prompt_flagged",
+    "recommended_arm": "wed_late",
+    "expected_response_rate": 0.5,
+    "scheduled_for": "2026-09-09T16:30:00+05:30"
+  },
+  "cash_forecast": {
+    "status": "HEALTHY",
+    "window_7_mean_inr": 5264176.27,
+    "window_7_range_inr": [
+      4192806.83,
+      6315916.22
+    ],
+    "window_30_mean_inr": 7022281.32,
+    "window_30_range_inr": [
+      6082022.32,
+      7995420.51
+    ],
+    "ci_30_coverage": 0.8333333333333334,
+    "ci_30_bias": 0.06424009189323204
+  },
+  "overall_verdict": "ALL_MODELS_OPERATIONAL"
+}

@@ -1,0 +1,679 @@
+{
+  "dataset": {
+    "feature_count": 23,
+    "horizon_days": 30,
+    "seed": 42,
+    "train_end": "2026-02-27",
+    "validation_end": "2026-05-17",
+    "splits": {
+      "train": {
+        "rows": 3960,
+        "positive_rate": 0.6727,
+        "first_flag_date": "2025-03-10",
+        "last_flag_date": "2026-02-26"
+      },
+      "validation": {
+        "rows": 843,
+        "positive_rate": 0.6833,
+        "first_flag_date": "2026-02-27",
+        "last_flag_date": "2026-05-16"
+      },
+      "test": {
+        "rows": 856,
+        "positive_rate": 0.6904,
+        "first_flag_date": "2026-05-17",
+        "last_flag_date": "2026-08-02"
+      }
+    }
+  },
+  "calibration": "isotonic",
+  "threshold": 0.5,
+  "test": [
+    {
+      "model_name": "rules-based",
+      "split": "test",
+      "rows": 856,
+      "positive_rate": 0.690421,
+      "threshold": 0.5,
+      "roc_auc": 0.732395,
+      "average_precision": 0.861365,
+      "precision": 0.842353,
+      "recall": 0.605753,
+      "f1": 0.704724,
+      "accuracy": 0.649533,
+      "brier_score": 0.212962,
+      "log_loss": 0.612604,
+      "expected_calibration_error": 0.167185,
+      "calibration_bins": [
+        {
+          "lower": 0.0,
+          "upper": 0.1,
+          "count": 11,
+          "mean_predicted": 0.072297,
+          "observed_rate": 0.090909
+        },
+        {
+          "lower": 0.1,
+          "upper": 0.2,
+          "count": 36,
+          "mean_predicted": 0.148782,
+          "observed_rate": 0.305556
+        },
+        {
+          "lower": 0.2,
+          "upper": 0.3,
+          "count": 111,
+          "mean_predicted": 0.25222,
+          "observed_rate": 0.558559
+        },
+        {
+          "lower": 0.3,
+          "upper": 0.4,
+          "count": 153,
+          "mean_predicted": 0.352886,
+          "observed_rate": 0.594771
+        },
+        {
+          "lower": 0.4,
+          "upper": 0.5,
+          "count": 120,
+          "mean_predicted": 0.44864,
+          "observed_rate": 0.566667
+        },
+        {
+          "lower": 0.5,
+          "upper": 0.6,
+          "count": 72,
+          "mean_predicted": 0.544771,
+          "observed_rate": 0.708333
+        },
+        {
+          "lower": 0.6,
+          "upper": 0.7,
+          "count": 74,
+          "mean_predicted": 0.655973,
+          "observed_rate": 0.702703
+        },
+        {
+          "lower": 0.7,
+          "upper": 0.8,
+          "count": 161,
+          "mean_predicted": 0.752118,
+          "observed_rate": 0.869565
+        },
+        {
+          "lower": 0.8,
+          "upper": 0.9,
+          "count": 115,
+          "mean_predicted": 0.832988,
+          "observed_rate": 0.982609
+        },
+        {
+          "lower": 0.9,
+          "upper": 1.0,
+          "count": 3,
+          "mean_predicted": 0.91218,
+          "observed_rate": 0.666667
+        }
+      ]
+    },
+    {
+      "model_name": "logreg-recovery",
+      "split": "test",
+      "rows": 856,
+      "positive_rate": 0.690421,
+      "threshold": 0.5,
+      "roc_auc": 0.773636,
+      "average_precision": 0.871602,
+      "precision": 0.761838,
+      "recall": 0.92555,
+      "f1": 0.835752,
+      "accuracy": 0.748832,
+      "brier_score": 0.170602,
+      "log_loss": 0.510248,
+      "expected_calibration_error": 0.031454,
+      "calibration_bins": [
+        {
+          "lower": 0.0,
+          "upper": 0.1,
+          "count": 10,
+          "mean_predicted": 0.008336,
+          "observed_rate": 0.0
+        },
+        {
+          "lower": 0.1,
+          "upper": 0.2,
+          "count": 6,
+          "mean_predicted": 0.174996,
+          "observed_rate": 0.666667
+        },
+        {
+          "lower": 0.2,
+          "upper": 0.3,
+          "count": 3,
+          "mean_predicted": 0.248696,
+          "observed_rate": 0.666667
+        },
+        {
+          "lower": 0.3,
+          "upper": 0.4,
+          "count": 119,
+          "mean_predicted": 0.314786,
+          "observed_rate": 0.319328
+        },
+        {
+          "lower": 0.5,
+          "upper": 0.6,
+          "count": 200,
+          "mean_predicted": 0.581519,
+          "observed_rate": 0.595
+        },
+        {
+          "lower": 0.6,
+          "upper": 0.7,
+          "count": 88,
+          "mean_predicted": 0.658088,
+          "observed_rate": 0.670455
+        },
+        {
+          "lower": 0.7,
+          "upper": 0.8,
+          "count": 83,
+          "mean_predicted": 0.746908,
+          "observed_rate": 0.686747
+        },
+        {
+          "lower": 0.8,
+          "upper": 0.9,
+          "count": 145,
+          "mean_predicted": 0.870629,
+          "observed_rate": 0.834483
+        },
+        {
+          "lower": 0.9,
+          "upper": 1.0,
+          "count": 202,
+          "mean_predicted": 0.905555,
+          "observed_rate": 0.945545
+        }
+      ]
+    },
+    {
+      "model_name": "xgb-recovery",
+      "split": "test",
+      "rows": 856,
+      "positive_rate": 0.690421,
+      "threshold": 0.5,
+      "roc_auc": 0.768665,
+      "average_precision": 0.859169,
+      "precision": 0.751026,
+      "recall": 0.928934,
+      "f1": 0.83056,
+      "accuracy": 0.738318,
+      "brier_score": 0.172924,
+      "log_loss": 0.636655,
+      "expected_calibration_error": 0.027192,
+      "calibration_bins": [
+        {
+          "lower": 0.0,
+          "upper": 0.1,
+          "count": 11,
+          "mean_predicted": 0.0,
+          "observed_rate": 0.272727
+        },
+        {
+          "lower": 0.2,
+          "upper": 0.3,
+          "count": 8,
+          "mean_predicted": 0.211823,
+          "observed_rate": 0.125
+        },
+        {
+          "lower": 0.3,
+          "upper": 0.4,
+          "count": 106,
+          "mean_predicted": 0.359281,
+          "observed_rate": 0.358491
+        },
+        {
+          "lower": 0.5,
+          "upper": 0.6,
+          "count": 100,
+          "mean_predicted": 0.545968,
+          "observed_rate": 0.46
+        },
+        {
+          "lower": 0.6,
+          "upper": 0.7,
+          "count": 220,
+          "mean_predicted": 0.665348,
+          "observed_rate": 0.645455
+        },
+        {
+          "lower": 0.7,
+          "upper": 0.8,
+          "count": 4,
+          "mean_predicted": 0.792036,
+          "observed_rate": 0.75
+        },
+        {
+          "lower": 0.8,
+          "upper": 0.9,
+          "count": 405,
+          "mean_predicted": 0.863414,
+          "observed_rate": 0.879012
+        },
+        {
+          "lower": 0.9,
+          "upper": 1.0,
+          "count": 2,
+          "mean_predicted": 0.98039,
+          "observed_rate": 1.0
+        }
+      ]
+    },
+    {
+      "model_name": "mlp-recovery",
+      "split": "test",
+      "rows": 856,
+      "positive_rate": 0.690421,
+      "threshold": 0.5,
+      "roc_auc": 0.7666,
+      "average_precision": 0.857424,
+      "precision": 0.782132,
+      "recall": 0.844332,
+      "f1": 0.812042,
+      "accuracy": 0.73014,
+      "brier_score": 0.17434,
+      "log_loss": 0.520418,
+      "expected_calibration_error": 0.032761,
+      "calibration_bins": [
+        {
+          "lower": 0.1,
+          "upper": 0.2,
+          "count": 1,
+          "mean_predicted": 0.184201,
+          "observed_rate": 0.0
+        },
+        {
+          "lower": 0.2,
+          "upper": 0.3,
+          "count": 48,
+          "mean_predicted": 0.254677,
+          "observed_rate": 0.3125
+        },
+        {
+          "lower": 0.3,
+          "upper": 0.4,
+          "count": 36,
+          "mean_predicted": 0.352867,
+          "observed_rate": 0.305556
+        },
+        {
+          "lower": 0.4,
+          "upper": 0.5,
+          "count": 133,
+          "mean_predicted": 0.442498,
+          "observed_rate": 0.496241
+        },
+        {
+          "lower": 0.5,
+          "upper": 0.6,
+          "count": 54,
+          "mean_predicted": 0.540123,
+          "observed_rate": 0.574074
+        },
+        {
+          "lower": 0.6,
+          "upper": 0.7,
+          "count": 9,
+          "mean_predicted": 0.650095,
+          "observed_rate": 0.555556
+        },
+        {
+          "lower": 0.7,
+          "upper": 0.8,
+          "count": 236,
+          "mean_predicted": 0.706647,
+          "observed_rate": 0.661017
+        },
+        {
+          "lower": 0.8,
+          "upper": 0.9,
+          "count": 257,
+          "mean_predicted": 0.887168,
+          "observed_rate": 0.894942
+        },
+        {
+          "lower": 0.9,
+          "upper": 1.0,
+          "count": 82,
+          "mean_predicted": 0.929488,
+          "observed_rate": 0.939024
+        }
+      ]
+    }
+  ],
+  "validation": [
+    {
+      "model_name": "logreg-recovery",
+      "split": "validation",
+      "rows": 843,
+      "positive_rate": 0.683274,
+      "threshold": 0.5,
+      "roc_auc": 0.773441,
+      "average_precision": 0.856928,
+      "precision": 0.758475,
+      "recall": 0.932292,
+      "f1": 0.836449,
+      "accuracy": 0.75089,
+      "brier_score": 0.169758,
+      "log_loss": 0.51126,
+      "expected_calibration_error": 0.0,
+      "calibration_bins": [
+        {
+          "lower": 0.0,
+          "upper": 0.1,
+          "count": 3,
+          "mean_predicted": 0.0,
+          "observed_rate": 0.0
+        },
+        {
+          "lower": 0.1,
+          "upper": 0.2,
+          "count": 17,
+          "mean_predicted": 0.176471,
+          "observed_rate": 0.176471
+        },
+        {
+          "lower": 0.2,
+          "upper": 0.3,
+          "count": 4,
+          "mean_predicted": 0.25,
+          "observed_rate": 0.25
+        },
+        {
+          "lower": 0.3,
+          "upper": 0.4,
+          "count": 111,
+          "mean_predicted": 0.315315,
+          "observed_rate": 0.315315
+        },
+        {
+          "lower": 0.5,
+          "upper": 0.6,
+          "count": 203,
+          "mean_predicted": 0.581281,
+          "observed_rate": 0.581281
+        },
+        {
+          "lower": 0.6,
+          "upper": 0.7,
+          "count": 85,
+          "mean_predicted": 0.658824,
+          "observed_rate": 0.658824
+        },
+        {
+          "lower": 0.7,
+          "upper": 0.8,
+          "count": 79,
+          "mean_predicted": 0.746835,
+          "observed_rate": 0.746835
+        },
+        {
+          "lower": 0.8,
+          "upper": 0.9,
+          "count": 145,
+          "mean_predicted": 0.868966,
+          "observed_rate": 0.868966
+        },
+        {
+          "lower": 0.9,
+          "upper": 1.0,
+          "count": 196,
+          "mean_predicted": 0.908163,
+          "observed_rate": 0.908163
+        }
+      ]
+    },
+    {
+      "model_name": "xgb-recovery",
+      "split": "validation",
+      "rows": 843,
+      "positive_rate": 0.683274,
+      "threshold": 0.5,
+      "roc_auc": 0.758645,
+      "average_precision": 0.846468,
+      "precision": 0.759768,
+      "recall": 0.911458,
+      "f1": 0.828729,
+      "accuracy": 0.742586,
+      "brier_score": 0.175102,
+      "log_loss": 0.525687,
+      "expected_calibration_error": 0.002372,
+      "calibration_bins": [
+        {
+          "lower": 0.0,
+          "upper": 0.1,
+          "count": 4,
+          "mean_predicted": 0.0,
+          "observed_rate": 0.0
+        },
+        {
+          "lower": 0.1,
+          "upper": 0.2,
+          "count": 2,
+          "mean_predicted": 0.2,
+          "observed_rate": 0.5
+        },
+        {
+          "lower": 0.2,
+          "upper": 0.3,
+          "count": 13,
+          "mean_predicted": 0.2,
+          "observed_rate": 0.153846
+        },
+        {
+          "lower": 0.3,
+          "upper": 0.4,
+          "count": 133,
+          "mean_predicted": 0.360902,
+          "observed_rate": 0.360902
+        },
+        {
+          "lower": 0.5,
+          "upper": 0.6,
+          "count": 98,
+          "mean_predicted": 0.55102,
+          "observed_rate": 0.55102
+        },
+        {
+          "lower": 0.6,
+          "upper": 0.7,
+          "count": 215,
+          "mean_predicted": 0.665116,
+          "observed_rate": 0.665116
+        },
+        {
+          "lower": 0.7,
+          "upper": 0.8,
+          "count": 2,
+          "mean_predicted": 0.8,
+          "observed_rate": 1.0
+        },
+        {
+          "lower": 0.8,
+          "upper": 0.9,
+          "count": 375,
+          "mean_predicted": 0.867733,
+          "observed_rate": 0.866667
+        },
+        {
+          "lower": 0.9,
+          "upper": 1.0,
+          "count": 1,
+          "mean_predicted": 1.0,
+          "observed_rate": 1.0
+        }
+      ]
+    },
+    {
+      "model_name": "mlp-recovery",
+      "split": "validation",
+      "rows": 843,
+      "positive_rate": 0.683274,
+      "threshold": 0.5,
+      "roc_auc": 0.771617,
+      "average_precision": 0.850124,
+      "precision": 0.795122,
+      "recall": 0.848958,
+      "f1": 0.821159,
+      "accuracy": 0.747331,
+      "brier_score": 0.170721,
+      "log_loss": 0.514595,
+      "expected_calibration_error": 0.0,
+      "calibration_bins": [
+        {
+          "lower": 0.0,
+          "upper": 0.1,
+          "count": 1,
+          "mean_predicted": 0.0,
+          "observed_rate": 0.0
+        },
+        {
+          "lower": 0.2,
+          "upper": 0.3,
+          "count": 58,
+          "mean_predicted": 0.258621,
+          "observed_rate": 0.258621
+        },
+        {
+          "lower": 0.3,
+          "upper": 0.4,
+          "count": 31,
+          "mean_predicted": 0.354839,
+          "observed_rate": 0.354839
+        },
+        {
+          "lower": 0.4,
+          "upper": 0.5,
+          "count": 138,
+          "mean_predicted": 0.442029,
+          "observed_rate": 0.442029
+        },
+        {
+          "lower": 0.5,
+          "upper": 0.6,
+          "count": 46,
+          "mean_predicted": 0.543478,
+          "observed_rate": 0.543478
+        },
+        {
+          "lower": 0.6,
+          "upper": 0.7,
+          "count": 3,
+          "mean_predicted": 0.666667,
+          "observed_rate": 0.666667
+        },
+        {
+          "lower": 0.7,
+          "upper": 0.8,
+          "count": 242,
+          "mean_predicted": 0.706612,
+          "observed_rate": 0.706612
+        },
+        {
+          "lower": 0.8,
+          "upper": 0.9,
+          "count": 239,
+          "mean_predicted": 0.887029,
+          "observed_rate": 0.887029
+        },
+        {
+          "lower": 0.9,
+          "upper": 1.0,
+          "count": 85,
+          "mean_predicted": 0.929412,
+          "observed_rate": 0.929412
+        }
+      ]
+    }
+  ],
+  "head_to_head": {
+    "split": "test",
+    "rows": 856,
+    "challenger": "logreg-recovery",
+    "incumbent": "rules-based",
+    "challenger_auc": 0.773636,
+    "incumbent_auc": 0.732395,
+    "challenger_brier": 0.170602,
+    "incumbent_brier": 0.212962,
+    "challenger_value_at_risk_at_k": 15575860.27,
+    "incumbent_value_at_risk_at_k": 13457956.66,
+    "k": 171
+  },
+  "selected_model": "logreg-recovery",
+  "global_importance": [
+    [
+      "recency_weighted_on_time_score",
+      0.474963
+    ],
+    [
+      "customer_invoice_count",
+      0.291291
+    ],
+    [
+      "customer_on_time_ratio_all_time",
+      0.283512
+    ],
+    [
+      "customer_avg_days_late",
+      0.237674
+    ],
+    [
+      "prior_promise_kept",
+      0.207898
+    ],
+    [
+      "current_escalation_tier",
+      0.154733
+    ],
+    [
+      "customer_dispute_count",
+      0.1332
+    ],
+    [
+      "customer_broken_promises_count",
+      0.131605
+    ],
+    [
+      "customer_broken_promise_rate",
+      0.119863
+    ],
+    [
+      "invoice_amount",
+      0.1112
+    ],
+    [
+      "invoice_amount_log",
+      0.086352
+    ],
+    [
+      "customer_dispute_rate",
+      0.085927
+    ],
+    [
+      "invoice_amount_vs_customer_avg_ratio",
+      0.063856
+    ],
+    [
+      "has_prior_promise",
+      0.03716
+    ],
+    [
+      "days_since_last_contact",
+      0.034644
+    ]
+  ],
+  "model_version": "logreg-recovery-20260903-3f49c1"
+}

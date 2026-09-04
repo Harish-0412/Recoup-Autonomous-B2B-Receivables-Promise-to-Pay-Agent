@@ -133,3 +133,60 @@ class ClassifyPreviewOut(BaseModel):
     fallback_used: bool = False
     needs_review: bool = False
     explanation: str | None = None
+
+
+class DriftResultRow(BaseModel):
+    """One contamination level, one held-out split."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    contamination: float
+    threshold: float
+    holdout_flag_rate: float
+    holdout_normal_flag_rate: float
+    flagged_default_rate: float
+    unflagged_default_rate: float
+    lift: float
+    flagged_count: float
+
+
+class DriftInjectedOut(BaseModel):
+    """Recall on customers degraded on purpose -- the only check with ground truth."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    degraded: float
+    newly_flagged: float
+    recall: float
+
+
+class DriftDriverShareOut(BaseModel):
+    """How often a feature led the explanation among flagged holdout customers."""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    feature: str
+    flagged_share: float
+    vote_share: float
+
+
+class DriftCardOut(BaseModel):
+    """The drift model card as JSON.
+
+    ``source`` says where the numbers came from: a freshly written
+    ``model_card.json`` artifact, the full ``evaluation_report.json``, or the
+    committed fallback transcribed from ``docs/drift_model_card.md``.
+    """
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    model_version: str | None = None
+    shipped_model: str = "iforest-drift"
+    contamination: float = 0.10
+    threshold: float = 0.0
+    test_rows: int = 6000
+    source: str = "model_card_fallback"
+    results: list[DriftResultRow] = Field(default_factory=list)
+    injected_drift: DriftInjectedOut | None = None
+    global_drivers: list[DriftDriverShareOut] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)

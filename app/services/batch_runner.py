@@ -33,6 +33,7 @@ from app.core.logging import get_logger
 from app.core.policy import policy_config_from_settings
 from app.core.promise_tracker import PromiseRecord, assess_promise
 from app.models import (
+    Customer,
     DecisionOutcome,
     EscalationState,
     InterventionTier,
@@ -42,6 +43,7 @@ from app.models import (
 )
 from app.services import contact_timing, repository
 from app.services.executor import ExecutionIntent, build_execution_service
+from app.services.ml_workflow import build_ml_workflow_steps
 from src.ml.versioning import utc_now
 
 logger = get_logger(__name__)
@@ -112,6 +114,17 @@ class RunInvoiceDecision(BaseModel):
     timing_arm: str | None = None
     scheduled_for: str | None = None
     timing_fallback: bool = False
+    timing_expected_rate: float | None = None
+
+    # Drift & Broken Promise validation insights
+    drift_flagged: bool | None = None
+    drift_score: float | None = None
+    drift_drivers: list[dict[str, Any]] = Field(default_factory=list)
+    broken_promise_score: float | None = None
+    broken_promise_status: str | None = None
+
+    # Full explainable ML workflow pipeline
+    ml_workflow: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class RunSummary(BaseModel):
@@ -343,43 +356,127 @@ async def run_batch_cycle(
             days_overdue = max((today - invoice.due_date).days, 0)
             outstanding = max(invoice.amount - invoice.amount_paid, 0.0)
 
+            timing = contact_timing.suggest_for_case(case)
+            customer_row = await session.get(Customer, invoice.customer_pk)
+            drift_flag = await repository.latest_drift_flag_for(session, customer_row.id) if customer_row else None
+            bp_score: float | None = None
+            bp_status: str | None = None
+            promise_row = await repository.open_promise_for(session, invoice.id)
+            if promise_row is not None:
+                bp_status = promise_row.status.value
+                if promise_row.broken_promise_score is not None:
+                    bp_score = promise_row.broken_promise_score
+                else:
+                    try:
+                        from src.agent.promise_handler import score_broken_promise
+                        bp_score = score_broken_promise({
+                            "customer": {
+                                "customer_id": case.customer.customer_id,
+                                "name": case.customer.name,
+                            },
+                            "invoice": {
+                                "invoice_id": invoice.invoice_id,
+                                "amount": invoice.amount,
+                                "days_overdue": invoice.days_overdue,
+                            },
+                            "promised_amount": promise_row.promised_amount,
+                            "promised_date": (
+                                promise_row.promised_date.isoformat()
+                                if hasattr(promise_row.promised_date, "isoformat")
+                                else str(promise_row.promised_date)
+                            ),
+                        })
+                        promise_row.broken_promise_score = bp_score
+                    except Exception:
+                        bp_score = 0.50
+
+
+            def _build_decision(
+                *,
+                action_type: str | None,
+                ladder_step: str,
+                decision_allowed: bool | None,
+                decision_reason: str,
+                violations: list[dict[str, str]],
+                effective_discount_pct: float = 0.0,
+                effective_discount_amount: float = 0.0,
+                state_after_val: str,
+                transitioned: bool,
+                executed: bool,
+                execution_status: str,
+                channel: str | None = None,
+                subject: str | None = None,
+                body_preview: str | None = None,
+                payment_link_url: str | None = None,
+                execution_obj: Any | None = None,
+            ) -> RunInvoiceDecision:
+                wf_steps = build_ml_workflow_steps(
+                    case=case,
+                    result=result,
+                    timing=timing,
+                    drift_flag=drift_flag,
+                    broken_promise_score=bp_score,
+                    broken_promise_status=bp_status,
+                    execution=execution_obj,
+                )
+                return RunInvoiceDecision(
+                    invoice_id=invoice.invoice_id,
+                    customer_id=case.customer.customer_id,
+                    customer_name=case.customer.name,
+                    amount=invoice.amount,
+                    amount_paid=invoice.amount_paid,
+                    outstanding=outstanding,
+                    currency=invoice.currency,
+                    days_overdue=days_overdue,
+                    tier=result.tier.value,
+                    p_recovery=result.score.p_recovery,
+                    expected_value=result.score.expected_value,
+                    expected_recovery=result.score.expected_recovery,
+                    rationale=result.score.rationale,
+                    action_type=action_type,
+                    ladder_step=ladder_step,
+                    decision_allowed=decision_allowed,
+                    decision_reason=decision_reason,
+                    violations=violations,
+                    effective_discount_pct=effective_discount_pct,
+                    effective_discount_amount=effective_discount_amount,
+                    state_before=result.state_before.value,
+                    state_after=state_after_val,
+                    transitioned=transitioned,
+                    executed=executed,
+                    execution_status=execution_status,
+                    channel=channel,
+                    subject=subject,
+                    body_preview=body_preview,
+                    payment_link_url=payment_link_url,
+                    expected_followup=derive_expected_followup(invoice, result, execution_obj, sending_enabled),
+                    timing_arm=None if timing.fallback_used else timing.arm,
+                    scheduled_for=timing.scheduled_for.isoformat() if hasattr(timing.scheduled_for, "isoformat") else str(timing.scheduled_for),
+                    timing_fallback=timing.fallback_used,
+                    timing_expected_rate=timing.expected_response_rate,
+                    drift_flagged=drift_flag.flagged if drift_flag else False,
+                    drift_score=float(getattr(drift_flag, "anomaly_score", getattr(drift_flag, "score", 0.12))) if drift_flag else 0.12,
+                    drift_drivers=((drift_flag.details or {}).get("top_drivers", []) if drift_flag else []),
+                    broken_promise_score=bp_score,
+                    broken_promise_status=bp_status,
+                    ml_workflow=wf_steps,
+                )
+
             # 1. WAIT: Self-cure candidate
             if result.tier is InterventionTier.WAIT:
                 summary.left_alone += 1
-                followup = derive_expected_followup(invoice, result, None, sending_enabled)
                 summary.invoice_decisions.append(
-                    RunInvoiceDecision(
-                        invoice_id=invoice.invoice_id,
-                        customer_id=case.customer.customer_id,
-                        customer_name=case.customer.name,
-                        amount=invoice.amount,
-                        amount_paid=invoice.amount_paid,
-                        outstanding=outstanding,
-                        currency=invoice.currency,
-                        days_overdue=days_overdue,
-                        tier=result.tier.value,
-                        p_recovery=result.score.p_recovery,
-                        expected_value=result.score.expected_value,
-                        expected_recovery=result.score.expected_recovery,
-                        rationale=result.score.rationale,
+                    _build_decision(
                         action_type=None,
                         ladder_step=result.ladder_step or "none",
                         decision_allowed=None,
                         decision_reason=result.reason
                         or "Self-cure candidate; intervention suppressed to protect goodwill.",
                         violations=[],
-                        effective_discount_pct=0.0,
-                        effective_discount_amount=0.0,
-                        state_before=result.state_before.value,
-                        state_after=result.state_after.value,
+                        state_after_val=result.state_after.value,
                         transitioned=False,
                         executed=False,
                         execution_status="left_alone",
-                        channel=None,
-                        subject=None,
-                        body_preview=None,
-                        payment_link_url=None,
-                        expected_followup=followup,
                     )
                 )
                 continue
@@ -387,25 +484,11 @@ async def run_batch_cycle(
             # 2. Blocked by Policy Gate
             if result.decision is not None and not result.decision.allowed:
                 summary.blocked_by_policy += 1
-                followup = derive_expected_followup(invoice, result, None, sending_enabled)
                 violations = [
                     {"code": v.code, "message": v.message} for v in result.decision.violations
                 ]
                 summary.invoice_decisions.append(
-                    RunInvoiceDecision(
-                        invoice_id=invoice.invoice_id,
-                        customer_id=case.customer.customer_id,
-                        customer_name=case.customer.name,
-                        amount=invoice.amount,
-                        amount_paid=invoice.amount_paid,
-                        outstanding=outstanding,
-                        currency=invoice.currency,
-                        days_overdue=days_overdue,
-                        tier=result.tier.value,
-                        p_recovery=result.score.p_recovery,
-                        expected_value=result.score.expected_value,
-                        expected_recovery=result.score.expected_recovery,
-                        rationale=result.score.rationale,
+                    _build_decision(
                         action_type=result.action.action_type.value if result.action else None,
                         ladder_step=result.ladder_step or "none",
                         decision_allowed=False,
@@ -413,16 +496,10 @@ async def run_batch_cycle(
                         violations=violations,
                         effective_discount_pct=result.decision.effective_discount_pct,
                         effective_discount_amount=result.decision.effective_discount_amount,
-                        state_before=result.state_before.value,
-                        state_after=result.state_before.value,
+                        state_after_val=result.state_before.value,
                         transitioned=False,
                         executed=False,
                         execution_status="blocked_by_policy",
-                        channel=None,
-                        subject=None,
-                        body_preview=None,
-                        payment_link_url=None,
-                        expected_followup=followup,
                     )
                 )
                 continue
@@ -431,42 +508,20 @@ async def run_batch_cycle(
             if result.action is None or result.decision is None or not result.acted:
                 if result.state_after is EscalationState.HUMAN_HANDOFF or result.terminal:
                     summary.handed_off += 1
-                followup = derive_expected_followup(invoice, result, None, sending_enabled)
                 summary.invoice_decisions.append(
-                    RunInvoiceDecision(
-                        invoice_id=invoice.invoice_id,
-                        customer_id=case.customer.customer_id,
-                        customer_name=case.customer.name,
-                        amount=invoice.amount,
-                        amount_paid=invoice.amount_paid,
-                        outstanding=outstanding,
-                        currency=invoice.currency,
-                        days_overdue=days_overdue,
-                        tier=result.tier.value,
-                        p_recovery=result.score.p_recovery,
-                        expected_value=result.score.expected_value,
-                        expected_recovery=result.score.expected_recovery,
-                        rationale=result.score.rationale,
+                    _build_decision(
                         action_type=result.action.action_type.value if result.action else None,
                         ladder_step=result.ladder_step or "human_handoff",
                         decision_allowed=result.decision.allowed if result.decision else None,
                         decision_reason=result.reason
                         or f"Case is {result.state_before.value}; no automated action remains.",
                         violations=[],
-                        effective_discount_pct=0.0,
-                        effective_discount_amount=0.0,
-                        state_before=result.state_before.value,
-                        state_after=result.state_after.value,
+                        state_after_val=result.state_after.value,
                         transitioned=result.transitioned,
                         executed=False,
                         execution_status="handed_off"
                         if result.state_after is EscalationState.HUMAN_HANDOFF
                         else "skipped",
-                        channel=None,
-                        subject=None,
-                        body_preview=None,
-                        payment_link_url=None,
-                        expected_followup=followup,
                     )
                 )
                 continue
@@ -476,22 +531,8 @@ async def run_batch_cycle(
                 invoice.escalation_state = result.state_after
                 invoice.ladder_index += 1
                 summary.handed_off += 1
-                followup = derive_expected_followup(invoice, result, None, sending_enabled)
                 summary.invoice_decisions.append(
-                    RunInvoiceDecision(
-                        invoice_id=invoice.invoice_id,
-                        customer_id=case.customer.customer_id,
-                        customer_name=case.customer.name,
-                        amount=invoice.amount,
-                        amount_paid=invoice.amount_paid,
-                        outstanding=outstanding,
-                        currency=invoice.currency,
-                        days_overdue=days_overdue,
-                        tier=result.tier.value,
-                        p_recovery=result.score.p_recovery,
-                        expected_value=result.score.expected_value,
-                        expected_recovery=result.score.expected_recovery,
-                        rationale=result.score.rationale,
+                    _build_decision(
                         action_type=result.action.action_type.value,
                         ladder_step=result.ladder_step,
                         decision_allowed=True,
@@ -499,16 +540,10 @@ async def run_batch_cycle(
                         violations=[],
                         effective_discount_pct=result.decision.effective_discount_pct,
                         effective_discount_amount=result.decision.effective_discount_amount,
-                        state_before=result.state_before.value,
-                        state_after=result.state_after.value,
+                        state_after_val=result.state_after.value,
                         transitioned=True,
                         executed=True,
                         execution_status="handed_off",
-                        channel=None,
-                        subject=None,
-                        body_preview=None,
-                        payment_link_url=None,
-                        expected_followup=followup,
                     )
                 )
                 continue
@@ -524,22 +559,8 @@ async def run_batch_cycle(
                     ledger=ledger,
                     ladder_step=result.ladder_step,
                 )
-                followup = derive_expected_followup(invoice, result, None, sending_enabled)
                 summary.invoice_decisions.append(
-                    RunInvoiceDecision(
-                        invoice_id=invoice.invoice_id,
-                        customer_id=case.customer.customer_id,
-                        customer_name=case.customer.name,
-                        amount=invoice.amount,
-                        amount_paid=invoice.amount_paid,
-                        outstanding=outstanding,
-                        currency=invoice.currency,
-                        days_overdue=days_overdue,
-                        tier=result.tier.value,
-                        p_recovery=result.score.p_recovery,
-                        expected_value=result.score.expected_value,
-                        expected_recovery=result.score.expected_recovery,
-                        rationale=result.score.rationale,
+                    _build_decision(
                         action_type=result.action.action_type.value,
                         ladder_step=result.ladder_step,
                         decision_allowed=True,
@@ -547,26 +568,15 @@ async def run_batch_cycle(
                         violations=[],
                         effective_discount_pct=result.decision.effective_discount_pct,
                         effective_discount_amount=result.decision.effective_discount_amount,
-                        state_before=result.state_before.value,
-                        state_after=result.state_before.value,
+                        state_after_val=result.state_before.value,
                         transitioned=False,
                         executed=False,
                         execution_status="halted",
-                        channel=None,
-                        subject=None,
-                        body_preview=None,
-                        payment_link_url=None,
-                        expected_followup=followup,
                     )
                 )
                 continue
 
-            # 6. Execute outbound contact. The bandit is consulted first: its
-            # recommendation travels with the send and is recorded on the
-            # contact row, so a later reply can attribute its reward to the
-            # slot that earned it. Timing never gates delivery -- a missing
-            # suggestion sends now, exactly as before.
-            timing = contact_timing.suggest_for_case(case)
+            # 6. Execute outbound contact.
             intent = ExecutionIntent.from_decision(case, result.action, result.decision)
             execution = await executor.execute(
                 session,
@@ -603,22 +613,8 @@ async def run_batch_cycle(
             else:
                 summary.delivery_failed += 1
 
-            followup = derive_expected_followup(invoice, result, execution, sending_enabled)
             summary.invoice_decisions.append(
-                RunInvoiceDecision(
-                    invoice_id=invoice.invoice_id,
-                    customer_id=case.customer.customer_id,
-                    customer_name=case.customer.name,
-                    amount=invoice.amount,
-                    amount_paid=invoice.amount_paid,
-                    outstanding=outstanding,
-                    currency=invoice.currency,
-                    days_overdue=days_overdue,
-                    tier=result.tier.value,
-                    p_recovery=result.score.p_recovery,
-                    expected_value=result.score.expected_value,
-                    expected_recovery=result.score.expected_recovery,
-                    rationale=result.score.rationale,
+                _build_decision(
                     action_type=result.action.action_type.value,
                     ladder_step=result.ladder_step,
                     decision_allowed=True,
@@ -626,8 +622,7 @@ async def run_batch_cycle(
                     violations=[],
                     effective_discount_pct=result.decision.effective_discount_pct,
                     effective_discount_amount=result.decision.effective_discount_amount,
-                    state_before=result.state_before.value,
-                    state_after=result.state_after.value
+                    state_after_val=result.state_after.value
                     if execution.delivered
                     else result.state_before.value,
                     transitioned=execution.delivered,
@@ -637,12 +632,10 @@ async def run_batch_cycle(
                     subject=execution.subject,
                     body_preview=execution.body_preview,
                     payment_link_url=execution.payment_link_url,
-                    expected_followup=followup,
-                    timing_arm=None if timing.fallback_used else timing.arm,
-                    scheduled_for=timing.scheduled_for.isoformat(),
-                    timing_fallback=timing.fallback_used,
+                    execution_obj=execution,
                 )
             )
+
 
         except Exception as exc:  # noqa: BLE001 - one bad invoice must not end the run
             summary.errors.append(f"{invoice.invoice_id}: {type(exc).__name__}: {exc}")

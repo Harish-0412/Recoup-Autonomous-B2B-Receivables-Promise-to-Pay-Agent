@@ -1,0 +1,27 @@
+{
+  "customers": 1200,
+  "touches": 14400,
+  "seed": 42,
+  "touches_per_customer": 12,
+  "arms": [
+    "mon_morning",
+    "mon_midday",
+    "mon_late",
+    "tue_morning",
+    "tue_midday",
+    "tue_late",
+    "wed_morning",
+    "wed_midday",
+    "wed_late",
+    "thu_morning",
+    "thu_midday",
+    "thu_late",
+    "fri_morning",
+    "fri_midday",
+    "fri_late"
+  ],
+  "logging_policy": "uniform",
+  "logging_propensity": 0.06666666666666667,
+  "reward_definition": "customer responded (opened/replied) within 48h of the touch",
+  "provenance": "Response labels from the archetype response model in src/ml/contact_timing/dataset.py (RESPONSE_MODEL): a behavioural assumption, not measured inbox data. Segment features are identical to production Customer rows."
+}

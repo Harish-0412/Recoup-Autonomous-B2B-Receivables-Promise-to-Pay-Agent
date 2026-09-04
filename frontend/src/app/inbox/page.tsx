@@ -821,7 +821,7 @@ export default function InboxPage() {
           >
             {queueItems.map((it, idx) => (
               <QueueRow
-                key={it.reply_id}
+                key={`${it.reply_id || 'reply'}-${idx}`}
                 item={it}
                 index={idx}
                 isSelected={selectedId === it.reply_id}

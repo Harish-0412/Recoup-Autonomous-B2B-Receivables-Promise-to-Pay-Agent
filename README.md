@@ -345,6 +345,8 @@ Never commit a filled-in `.env`. `.env.example` should contain keys only, no rea
 | `POST` | `/api/v1/invoices/{id}/run-cycle` | Manually trigger one agent decision cycle (useful for the demo) |
 | `POST` | `/api/v1/webhooks/razorpay` | Razorpay Payment Link webhook receiver |
 | `GET` | `/api/v1/reports/batch` | The evaluation report shown above |
+| `GET` | `/api/v1/forecast/cash` | Probabilistic 7/30-day cash forecast over the at-risk book |
+| `GET` | `/api/v1/forecast/cash/card` | Validation numbers behind the forecast (coverage, bias) |
 | `GET` | `/api/v1/policy` | View the currently configured policy (ceilings, caps, ladder) |
 
 *(All of the above are implemented and routed. `GET /api/v1/health/db` also exists.)*

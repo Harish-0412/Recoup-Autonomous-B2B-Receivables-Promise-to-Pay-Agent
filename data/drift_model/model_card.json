@@ -1,0 +1,92 @@
+{
+  "model_version": "iforest-drift-20260904-f990b2",
+  "shipped_model": "iforest-drift",
+  "contamination": 0.1,
+  "threshold": 0.0,
+  "test_rows": 6000,
+  "source": "evaluation_report.json",
+  "results": [
+    {
+      "contamination": 0.1,
+      "threshold": 0.0,
+      "holdout_flag_rate": 0.16133333333333333,
+      "holdout_normal_flag_rate": 0.10014979670447251,
+      "flagged_default_rate": 0.5165289256198347,
+      "unflagged_default_rate": 0.16434817170111288,
+      "lift": 3.1428942608452335,
+      "flagged_count": 968.0
+    },
+    {
+      "contamination": 0.05,
+      "threshold": 0.0,
+      "holdout_flag_rate": 0.09133333333333334,
+      "holdout_normal_flag_rate": 0.05093087952065055,
+      "flagged_default_rate": 0.5656934306569343,
+      "unflagged_default_rate": 0.18653705062362436,
+      "lift": 3.0326062772287177,
+      "flagged_count": 548.0
+    },
+    {
+      "contamination": 0.15,
+      "threshold": 0.0,
+      "holdout_flag_rate": 0.21483333333333332,
+      "holdout_normal_flag_rate": 0.14787074684356943,
+      "flagged_default_rate": 0.46392552366175327,
+      "unflagged_default_rate": 0.1547442156654638,
+      "lift": 2.9980152839101777,
+      "flagged_count": 1289.0
+    }
+  ],
+  "injected_drift": {
+    "degraded": 2000.0,
+    "newly_flagged": 1388.0,
+    "recall": 0.694
+  },
+  "global_drivers": [
+    {
+      "feature": "payment_delay_max",
+      "flagged_share": 0.9959,
+      "vote_share": 0.332
+    },
+    {
+      "feature": "payment_delay_mean",
+      "flagged_share": 0.9835,
+      "vote_share": 0.3278
+    },
+    {
+      "feature": "delinquent_rate",
+      "flagged_share": 0.6136,
+      "vote_share": 0.2045
+    },
+    {
+      "feature": "payment_delay_trend",
+      "flagged_share": 0.2159,
+      "vote_share": 0.072
+    },
+    {
+      "feature": "missed_rate",
+      "flagged_share": 0.1043,
+      "vote_share": 0.0348
+    },
+    {
+      "feature": "bill_volatility",
+      "flagged_share": 0.0548,
+      "vote_share": 0.0183
+    },
+    {
+      "feature": "pay_ratio_trend",
+      "flagged_share": 0.0238,
+      "vote_share": 0.0079
+    },
+    {
+      "feature": "utilization",
+      "flagged_share": 0.0062,
+      "vote_share": 0.0021
+    },
+    {
+      "feature": "pay_ratio_mean",
+      "flagged_share": 0.0021,
+      "vote_share": 0.0007
+    }
+  ]
+}

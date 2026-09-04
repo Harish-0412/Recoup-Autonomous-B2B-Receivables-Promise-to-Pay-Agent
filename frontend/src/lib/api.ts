@@ -187,6 +187,30 @@ export interface RunCycleResponse {
   scorer_fallback: boolean;
   scorer_version: string;
   execution: ExecutionOut | null;
+  // Unified ML validation trace (backend: build_ml_workflow_steps). Absent on
+  // old cached responses — every consumer must treat these as optional.
+  timing_arm?: string | null;
+  timing_expected_rate?: number | null;
+  timing_scheduled_for?: string | null;
+  timing_fallback?: boolean;
+  drift_flagged?: boolean | null;
+  drift_score?: number | null;
+  drift_drivers?: Array<Record<string, any>>;
+  broken_promise_score?: number | null;
+  broken_promise_status?: string | null;
+  ml_workflow?: MLWorkflowStep[];
+}
+
+/** One step of the explainable ML workflow trace (app/services/ml_workflow.py). */
+export interface MLWorkflowStep {
+  id: string;
+  name: string;
+  model_type: string;
+  status: string;
+  verdict: string;
+  score: number | null;
+  score_label: string | null;
+  details: Record<string, any>;
 }
 
 export interface PromiseOut {
@@ -197,6 +221,7 @@ export interface PromiseOut {
   status: 'PENDING' | 'KEPT' | 'BROKEN' | 'SUPERSEDED';
   created_at: string;
   resolved_at: string | null;
+  broken_promise_score?: number | null;
 }
 
 export interface InvoiceOut {
@@ -330,6 +355,18 @@ export interface RunInvoiceDecision {
   body_preview: string | null;
   payment_link_url: string | null;
   expected_followup: ExpectedFollowup;
+  // Per-invoice ML validation (backend: RunInvoiceDecision). Same optionality
+  // rule as RunCycleResponse — old cached runs may lack these.
+  timing_arm?: string | null;
+  scheduled_for?: string | null;
+  timing_fallback?: boolean;
+  timing_expected_rate?: number | null;
+  drift_flagged?: boolean | null;
+  drift_score?: number | null;
+  drift_drivers?: Array<Record<string, any>>;
+  broken_promise_score?: number | null;
+  broken_promise_status?: string | null;
+  ml_workflow?: MLWorkflowStep[];
 }
 
 /** Mirrors app/services/batch_runner.py::RunSummary field-for-field. */
@@ -1561,3 +1598,299 @@ export function getFallbackBatchReport(): BatchReportResponse {
     ],
   };
 }
+
+// ---------------------------------------------------------------------------
+// Broken-Promise Risk Scorer API
+// ---------------------------------------------------------------------------
+
+export interface BrokenPromiseScoreRequest {
+  promise_id?: string;
+  invoice_id?: string;
+  customer_id?: string;
+  promised_amount?: number;
+  promised_date?: string;
+  customer?: Record<string, any>;
+  invoice?: Record<string, any>;
+  customer_broken_promise_rate?: number;
+  customer_on_time_ratio_90d?: number;
+  days_overdue_at_scoring?: number;
+  promise_horizon_days?: number;
+  [key: string]: any;
+}
+
+export interface BrokenPromiseScoreResponse {
+  risk_score: number;
+  risk_tier: 'LOW' | 'MEDIUM' | 'HIGH';
+  recommendation: string;
+  model_version: string;
+  features_used: Record<string, number>;
+}
+
+export async function scoreBrokenPromise(
+  payload: BrokenPromiseScoreRequest
+): Promise<BrokenPromiseScoreResponse> {
+  const host = process.env.NEXT_PUBLIC_API_URL?.replace('/api/v1', '') || 'http://127.0.0.1:8000';
+  const res = await fetch(`${host}/api/score/broken_promise`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to score broken promise: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchBrokenPromiseModelCard(): Promise<any> {
+  const host = process.env.NEXT_PUBLIC_API_URL?.replace('/api/v1', '') || 'http://127.0.0.1:8000';
+  const res = await fetch(`${host}/api/score/broken_promise/card`, {
+    method: 'GET',
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch model card: ${res.status}`);
+  }
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// Receivables cash forecast (GET /forecast/cash)
+// ---------------------------------------------------------------------------
+
+export interface CashForecastCard {
+  source: string;
+  model_version?: string;
+  coverage?: Record<string, number>;
+  bias?: Record<string, number>;
+  test_coverage?: Record<string, number>;
+  test_bias?: Record<string, number>;
+  [key: string]: unknown;
+}
+
+export interface CashWindowForecast {
+  window_days: number;
+  draws: number;
+  mean: number;
+  median: number;
+  p5: number;
+  p25: number;
+  p75: number;
+  p95: number;
+  prob_any_cash: number;
+}
+
+export interface CashForecastResponse {
+  windows: CashWindowForecast[];
+  n_invoices: number;
+  at_risk_value: number;
+  draws: number;
+  seed: number;
+  probability_source: string;
+  scorer_fallbacks: number;
+  lag_model_version: string;
+  calibrated: boolean;
+  generated_at: string;
+}
+
+export class ForecastApiError extends Error {
+  status?: number;
+  constructor(message: string, status?: number) {
+    super(message);
+    this.name = 'ForecastApiError';
+    this.status = status;
+  }
+}
+
+export async function fetchCashForecast(
+  opts: { limit?: number; draws?: number; seed?: number } = {}
+): Promise<CashForecastResponse> {
+  const params = new URLSearchParams();
+  if (opts.limit != null) params.set('limit', String(opts.limit));
+  if (opts.draws != null) params.set('draws', String(opts.draws));
+  if (opts.seed != null) params.set('seed', String(opts.seed));
+  const qs = params.toString() ? `?${params.toString()}` : '';
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/forecast/cash${qs}`, {
+      method: 'GET',
+      headers: operatorHeaders(),
+      cache: 'no-store',
+    });
+  } catch {
+    throw new ForecastApiError('Backend unreachable. Is the API running?');
+  }
+  if (res.ok) return (await res.json()) as CashForecastResponse;
+  if (res.status === 401) {
+    throw new ForecastApiError('Not authenticated. Set the operator key to read the forecast.', 401);
+  }
+  if (res.status === 503) {
+    throw new ForecastApiError('Cash-forecast model is not trained yet. Run scripts/train_cash_forecast.py.', 503);
+  }
+  throw new ForecastApiError(`Forecast request failed (HTTP ${res.status}).`, res.status);
+}
+
+export async function fetchCashForecastCard(): Promise<CashForecastCard | null> {
+  try {
+    const res = await fetch(`${API_BASE}/forecast/cash/card`, {
+      method: 'GET',
+      headers: operatorHeaders(),
+      cache: 'no-store',
+    });
+    if (res.ok) return (await res.json()) as CashForecastCard;
+  } catch {
+    // Card is decorative; the widget renders without it.
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Drift detector (GET /drift/flags) + contact-timing bandit (GET /schedule)
+// ---------------------------------------------------------------------------
+
+export interface DriftDriver {
+  feature: string;
+  value: number;
+  deviation: number;
+}
+
+export interface DriftFlag {
+  customer_id: string;
+  customer_name: string;
+  anomaly_score: number;
+  threshold: number;
+  flagged: boolean;
+  model_version: string;
+  window_days: number;
+  top_drivers: DriftDriver[];
+  created_at: string;
+}
+
+export interface DriftFlagList {
+  count: number;
+  items: DriftFlag[];
+}
+
+export async function fetchDriftFlags(
+  opts: { limit?: number; only_flagged?: boolean } = {}
+): Promise<DriftFlagList> {
+  const params = new URLSearchParams();
+  if (opts.limit != null) params.set('limit', String(opts.limit));
+  if (opts.only_flagged) params.set('only_flagged', 'true');
+  const qs = params.toString() ? `?${params.toString()}` : '';
+  const res = await fetch(`${API_BASE}/drift/flags${qs}`, {
+    method: 'GET',
+    headers: operatorHeaders(),
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch drift flags: ${res.status}`);
+  }
+  return (await res.json()) as DriftFlagList;
+}
+
+/** Latest drift verdict for one customer; null when never scored (404). */
+export async function fetchCustomerDrift(customerId: string): Promise<DriftFlag | null> {
+  const res = await fetch(`${API_BASE}/drift/flags/${encodeURIComponent(customerId)}`, {
+    method: 'GET',
+    headers: operatorHeaders(),
+    cache: 'no-store',
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw new Error(`Failed to fetch drift flag: ${res.status}`);
+  }
+  return (await res.json()) as DriftFlag;
+}
+
+export interface DriftCardResultRow {
+  contamination: number;
+  threshold: number;
+  holdout_flag_rate: number;
+  holdout_normal_flag_rate: number;
+  flagged_default_rate: number;
+  unflagged_default_rate: number;
+  lift: number;
+  flagged_count: number;
+}
+
+export interface DriftCard {
+  model_version?: string | null;
+  shipped_model: string;
+  contamination: number;
+  threshold: number;
+  test_rows: number;
+  source: string;
+  results: DriftCardResultRow[];
+  injected_drift?: { degraded: number; newly_flagged: number; recall: number } | null;
+  global_drivers: Array<{ feature: string; flagged_share: number; vote_share: number }>;
+  limitations: string[];
+}
+
+export async function fetchDriftCard(): Promise<DriftCard | null> {
+  try {
+    const res = await fetch(`${API_BASE}/models/drift/card`, {
+      method: 'GET',
+      cache: 'no-store',
+    });
+    if (res.ok) return (await res.json()) as DriftCard;
+  } catch {
+    // Card is decorative; callers render without it.
+  }
+  return null;
+}
+
+export interface NextTimeSuggestion {
+  customer_id: string;
+  segment: string;
+  arm: string;
+  scheduled_for: string;
+  expected_response_rate: number;
+  observations: number;
+  backed_off_to_global: boolean;
+  fallback_used: boolean;
+  fallback_reason: string;
+}
+
+/** Bandit send-time recommendation for a customer; null when unknown (404). */
+export async function fetchNextContactTime(customerId: string): Promise<NextTimeSuggestion | null> {
+  const res = await fetch(
+    `${API_BASE}/schedule/next_time?customer_id=${encodeURIComponent(customerId)}`,
+    { method: 'GET', cache: 'no-store' }
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw new Error(`Failed to fetch send-time suggestion: ${res.status}`);
+  }
+  return (await res.json()) as NextTimeSuggestion;
+}
+
+export interface TimingCard {
+  source: string;
+  model_version: string;
+  train_rows: number;
+  eval_rows: number;
+  eval_customers: number;
+  matched_rows: number;
+  policy_reward: number;
+  logging_reward: number;
+  lift_over_logging: number;
+  best_fixed_arm: string;
+  best_fixed_arm_reward: number;
+  truth_mae: number;
+  seed: number;
+  [key: string]: unknown;
+}
+
+export async function fetchTimingCard(): Promise<TimingCard | null> {
+  try {
+    const res = await fetch(`${API_BASE}/models/timing/card`, {
+      method: 'GET',
+      cache: 'no-store',
+    });
+    if (res.ok) return (await res.json()) as TimingCard;
+  } catch {
+    // Card is decorative; callers render without it.
+  }
+  return null;
+}
+

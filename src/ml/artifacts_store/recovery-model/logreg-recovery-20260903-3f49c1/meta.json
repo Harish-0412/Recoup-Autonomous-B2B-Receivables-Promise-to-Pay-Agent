@@ -1,0 +1,40 @@
+{
+  "model_name": "recovery-model",
+  "model_version": "logreg-recovery-20260903-3f49c1",
+  "trained_at": "2026-09-03T13:34:24.954303Z",
+  "train_rows": 3960,
+  "feature_columns": [
+    "customer_on_time_ratio_90d",
+    "customer_on_time_ratio_all_time",
+    "customer_avg_days_late",
+    "customer_invoice_count",
+    "customer_tenure_months",
+    "customer_broken_promises_count",
+    "customer_dispute_count",
+    "customer_broken_promise_rate",
+    "customer_dispute_rate",
+    "invoice_amount",
+    "invoice_amount_log",
+    "invoice_amount_vs_customer_avg_ratio",
+    "days_overdue_at_scoring",
+    "invoice_age_days",
+    "payment_terms_days",
+    "issued_day_of_week",
+    "issued_day_of_month",
+    "days_since_last_contact",
+    "prior_reminders_sent",
+    "has_prior_promise",
+    "prior_promise_kept",
+    "current_escalation_tier",
+    "recency_weighted_on_time_score"
+  ],
+  "metrics": {
+    "roc_auc": 0.773636,
+    "average_precision": 0.871602,
+    "f1": 0.835752,
+    "brier_score": 0.170602,
+    "expected_calibration_error": 0.031454,
+    "rules_based_roc_auc": 0.732395
+  },
+  "notes": "logreg-recovery, isotonic calibration on the validation split, temporal split at 2026-02-27/2026-05-17"
+}

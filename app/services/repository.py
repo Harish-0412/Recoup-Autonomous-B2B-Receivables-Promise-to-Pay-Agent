@@ -26,6 +26,7 @@ from app.models import (
     ContactChannel,
     ContactLog,
     Customer,
+    CustomerDriftFlag,
     DecisionTrace,
     DeliveryStatus,
     EscalationState,
@@ -472,6 +473,47 @@ async def record_promise(
         stale.status = PromiseStatus.SUPERSEDED
         stale.resolved_at = utc_now()
 
+    # Broken-Promise Risk Scorer: predict whether customer will honor commitment
+    broken_score = None
+    try:
+        from src.agent.promise_handler import score_broken_promise
+
+        customer = invoice.customer if hasattr(invoice, "customer") else None
+        cust_inv_count = getattr(customer, "invoice_count", 1) if customer else 1
+        score_payload = {
+            "promise_id": promise.promise_id,
+            "promised_amount": promise.promised_amount,
+            "promised_date": promise.promised_date.isoformat()
+            if hasattr(promise.promised_date, "isoformat")
+            else str(promise.promised_date),
+            "invoice_amount": invoice.amount,
+            "days_overdue_at_scoring": max((utc_now().date() - invoice.due_date).days, 0)
+            if hasattr(invoice, "due_date")
+            else 0,
+            "payment_terms_days": getattr(invoice, "payment_terms_days", 30),
+            "prior_reminders_sent": getattr(invoice, "prior_reminders_sent", 0),
+            "customer_broken_promises_count": getattr(customer, "prior_broken_promises_count", 0)
+            if customer
+            else 0,
+            "customer_avg_days_late": getattr(customer, "avg_days_late", 0.0) if customer else 0.0,
+            "customer_on_time_ratio_90d": getattr(customer, "on_time_ratio_90d", 0.85)
+            if customer
+            else 0.85,
+            "customer_on_time_ratio_all_time": getattr(customer, "on_time_ratio_all_time", 0.85)
+            if customer
+            else 0.85,
+            "customer_dispute_rate": (
+                getattr(customer, "prior_disputes_count", 0) / max(cust_inv_count, 1)
+            )
+            if customer
+            else 0.0,
+            "customer_invoice_count": cust_inv_count,
+            "customer_tenure_months": getattr(customer, "tenure_months", 12) if customer else 12,
+        }
+        broken_score = score_broken_promise(score_payload)
+    except Exception:
+        broken_score = 0.50
+
     row = Promise(
         promise_id=promise.promise_id,
         invoice_pk=invoice.id,
@@ -481,6 +523,7 @@ async def record_promise(
         source_reply_id=promise.source_reply_id,
         source_confidence=promise.source_confidence,
         status=PromiseStatus.PENDING,
+        broken_promise_score=broken_score,
     )
     session.add(row)
 
@@ -557,3 +600,90 @@ async def get_batch_run_by_id(session: AsyncSession, run_id: str) -> BatchRunRec
     """Get a specific batch run by its run_id."""
     result = await session.execute(select(BatchRunRecord).where(BatchRunRecord.run_id == run_id))
     return result.scalar_one_or_none()
+
+
+# ---------------------------------------------------------------------------
+# Drift flags
+# ---------------------------------------------------------------------------
+
+
+async def customers_with_open_invoices(
+    session: AsyncSession, *, limit: int = 500
+) -> list[Customer]:
+    """Distinct customers holding at least one actionable invoice."""
+
+    result = await session.execute(
+        select(Customer)
+        .join(Invoice, Invoice.customer_pk == Customer.id)
+        .where(
+            Invoice.status.in_(
+                [InvoiceStatus.OPEN, InvoiceStatus.IN_PROGRESS, InvoiceStatus.PROMISED]
+            ),
+            Invoice.escalation_state.notin_(
+                [EscalationState.HUMAN_HANDOFF, EscalationState.CLOSED]
+            ),
+        )
+        .distinct()
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
+async def invoices_for_customer(session: AsyncSession, customer_pk: int) -> list[Invoice]:
+    """Every invoice of one customer, for drift aggregation."""
+
+    result = await session.execute(
+        select(Invoice).where(Invoice.customer_pk == customer_pk).order_by(Invoice.due_date)
+    )
+    return list(result.scalars().all())
+
+
+async def save_drift_flag(session: AsyncSession, record: CustomerDriftFlag) -> CustomerDriftFlag:
+    """Persist one nightly drift verdict."""
+    session.add(record)
+    await session.flush()
+    return record
+
+
+async def latest_drift_flag_for(
+    session: AsyncSession, customer_pk: int
+) -> CustomerDriftFlag | None:
+    """The most recent drift verdict for one customer, if ever scored."""
+
+    result = await session.execute(
+        select(CustomerDriftFlag)
+        .where(CustomerDriftFlag.customer_pk == customer_pk)
+        .order_by(CustomerDriftFlag.created_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def recent_drift_flags(
+    session: AsyncSession, *, limit: int = 50, only_flagged: bool = False
+) -> list[tuple[CustomerDriftFlag, Customer]]:
+    """Recent verdicts with their customers, newest first."""
+
+    query = (
+        select(CustomerDriftFlag, Customer)
+        .join(Customer, Customer.id == CustomerDriftFlag.customer_pk)
+        .order_by(CustomerDriftFlag.created_at.desc())
+        .limit(limit)
+    )
+    if only_flagged:
+        query = query.where(CustomerDriftFlag.flagged.is_(True))
+    result = await session.execute(query)
+    return list(result.all())  # type: ignore[arg-type]
+
+
+async def count_recently_flagged_customers(session: AsyncSession, *, days: int = 7) -> int:
+    """Distinct customers flagged inside the trailing window, for /tasks/status."""
+
+    cutoff = utc_now() - timedelta(days=days)
+    result = await session.execute(
+        select(func.count(func.distinct(CustomerDriftFlag.customer_pk))).where(
+            CustomerDriftFlag.flagged.is_(True),
+            CustomerDriftFlag.created_at >= cutoff,
+        )
+    )
+    return int(result.scalar_one())
