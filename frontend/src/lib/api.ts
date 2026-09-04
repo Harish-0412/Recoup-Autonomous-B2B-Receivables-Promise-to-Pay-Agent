@@ -285,7 +285,22 @@ export interface TaskStatusResponse {
   expected_interval_seconds?: number;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api/v1';
+export function getApiBase(): string {
+  if (typeof window !== 'undefined' && window.location) {
+    const env = process.env.NEXT_PUBLIC_API_URL;
+    if (env && !env.includes('127.0.0.1') && !env.includes('localhost')) {
+      return env;
+    }
+    return `${window.location.protocol}//${window.location.hostname}:8000/api/v1`;
+  }
+  return process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api/v1';
+}
+
+const API_BASE = typeof window !== 'undefined'
+  ? (process.env.NEXT_PUBLIC_API_URL && !process.env.NEXT_PUBLIC_API_URL.includes('127.0.0.1') && !process.env.NEXT_PUBLIC_API_URL.includes('localhost')
+      ? process.env.NEXT_PUBLIC_API_URL
+      : `${window.location.protocol}//${window.location.hostname}:8000/api/v1`)
+  : (process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api/v1');
 // Never fall back to a real credential: an unset key sends no header, so the
 // API answers 401/503 visibly instead of authenticating every install.
 const ENV_TASK_KEY = process.env.NEXT_PUBLIC_TASK_API_KEY || '';
@@ -1629,10 +1644,10 @@ export interface BrokenPromiseScoreResponse {
 export async function scoreBrokenPromise(
   payload: BrokenPromiseScoreRequest
 ): Promise<BrokenPromiseScoreResponse> {
-  const host = process.env.NEXT_PUBLIC_API_URL?.replace('/api/v1', '') || 'http://127.0.0.1:8000';
+  const host = API_BASE.replace('/api/v1', '');
   const res = await fetch(`${host}/api/score/broken_promise`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: operatorHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
@@ -1642,7 +1657,7 @@ export async function scoreBrokenPromise(
 }
 
 export async function fetchBrokenPromiseModelCard(): Promise<any> {
-  const host = process.env.NEXT_PUBLIC_API_URL?.replace('/api/v1', '') || 'http://127.0.0.1:8000';
+  const host = API_BASE.replace('/api/v1', '');
   const res = await fetch(`${host}/api/score/broken_promise/card`, {
     method: 'GET',
     cache: 'no-store',
@@ -1855,7 +1870,7 @@ export interface NextTimeSuggestion {
 export async function fetchNextContactTime(customerId: string): Promise<NextTimeSuggestion | null> {
   const res = await fetch(
     `${API_BASE}/schedule/next_time?customer_id=${encodeURIComponent(customerId)}`,
-    { method: 'GET', cache: 'no-store' }
+    { method: 'GET', headers: operatorHeaders(), cache: 'no-store' }
   );
   if (res.status === 404) return null;
   if (!res.ok) {

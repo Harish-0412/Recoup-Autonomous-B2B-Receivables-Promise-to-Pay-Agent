@@ -12,11 +12,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
+from app.core.security import require_api_key
 from app.db.session import get_db
 from app.schemas.contact_timing import NextTimeOut
 from app.services import contact_timing, repository
 
-router = APIRouter(prefix="/schedule", tags=["schedule"])
+router = APIRouter(prefix="/schedule", tags=["schedule"], dependencies=[Depends(require_api_key)])
 logger = get_logger(__name__)
 
 

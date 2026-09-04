@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+
 from app.core.config import get_settings
 from app.services.razorpay_client import get_razorpay_client
 
@@ -58,22 +59,30 @@ def verify_broken_promise_scorer() -> dict[str, Any]:
     start = time.perf_counter()
 
     # 1. Low risk: reliable payer, zero broken promises, 2-day horizon
-    r_low = httpx.post(f"{BASE_URL}/api/score/broken_promise", json={
-        "customer_broken_promise_rate": 0.02,
-        "customer_on_time_ratio_90d": 0.96,
-        "days_overdue_at_scoring": 1,
-        "promise_horizon_days": 2,
-    })
+    r_low = httpx.post(
+        f"{BASE_URL}/api/score/broken_promise",
+        json={
+            "customer_broken_promise_rate": 0.02,
+            "customer_on_time_ratio_90d": 0.96,
+            "days_overdue_at_scoring": 1,
+            "promise_horizon_days": 2,
+        },
+        headers=OPERATOR_HEADERS,
+    )
     low_data = r_low.json()
     low_score = low_data["risk_score"]
 
     # 2. High risk: serial promise breaker, 20% on-time, 60 days overdue, 25-day horizon
-    r_high = httpx.post(f"{BASE_URL}/api/score/broken_promise", json={
-        "customer_broken_promise_rate": 0.85,
-        "customer_on_time_ratio_90d": 0.20,
-        "days_overdue_at_scoring": 60,
-        "promise_horizon_days": 25,
-    })
+    r_high = httpx.post(
+        f"{BASE_URL}/api/score/broken_promise",
+        json={
+            "customer_broken_promise_rate": 0.85,
+            "customer_on_time_ratio_90d": 0.20,
+            "days_overdue_at_scoring": 60,
+            "promise_horizon_days": 25,
+        },
+        headers=OPERATOR_HEADERS,
+    )
     high_data = r_high.json()
     high_score = high_data["risk_score"]
 
@@ -142,7 +151,10 @@ def verify_contact_timing_optimizer() -> dict[str, Any]:
     r_cust = httpx.get(f"{BASE_URL}/api/v1/invoices?page=1&page_size=1", headers=OPERATOR_HEADERS)
     cust_id = r_cust.json()["items"][0]["customer_id"]
 
-    r_opt = httpx.get(f"{BASE_URL}/api/v1/schedule/next_time?customer_id={cust_id}")
+    r_opt = httpx.get(
+        f"{BASE_URL}/api/v1/schedule/next_time?customer_id={cust_id}",
+        headers=OPERATOR_HEADERS,
+    )
     rec = r_opt.json()
 
     print(f"Optimal Send-Time for {cust_id} ({rec['segment']}):")

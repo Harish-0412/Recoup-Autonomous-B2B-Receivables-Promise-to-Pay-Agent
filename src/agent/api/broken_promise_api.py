@@ -9,9 +9,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+from app.core.security import require_api_key
 from src.agent.promise_handler import (
     FEATURE_COLUMNS,
     build_broken_promise_features,
@@ -68,7 +69,11 @@ def get_risk_tier(score: float) -> tuple[str, str]:
         return "HIGH", "High probability of broken promise. Prepare automated ladder escalation if unpaid within 24h."
 
 
-@router.post("/score/broken_promise", response_model=BrokenPromiseScoreResponse)
+@router.post(
+    "/score/broken_promise",
+    response_model=BrokenPromiseScoreResponse,
+    dependencies=[Depends(require_api_key)],
+)
 async def score_promise_endpoint(payload: BrokenPromiseScoreRequest) -> BrokenPromiseScoreResponse:
     """Predict whether a customer will honor or break their payment promise."""
     data = payload.model_dump(exclude_none=True)

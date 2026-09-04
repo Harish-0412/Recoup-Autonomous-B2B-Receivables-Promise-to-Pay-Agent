@@ -350,5 +350,9 @@ curl localhost:8000/api/v1/tasks/status -H "Authorization: Bearer $TASK_API_KEY"
 | POST | `/api/v1/policy/simulate` | bearer | Counterfactual replay (501: not built) |
 | GET | `/api/v1/models/recovery/card` | — | Public model evidence |
 | GET | `/api/v1/models/drift/card` | — | Public drift-model evidence |
+| GET | `/api/v1/models/timing/card` | — | Public contact-timing model evidence |
 | GET | `/api/v1/drift/flags` | bearer | Nightly drift verdicts, newest first |
 | GET | `/api/v1/drift/flags/{customer_id}` | bearer | Latest drift verdict, one customer |
+| GET | `/api/v1/schedule/next_time` | bearer | Optimal reminder send-time recommendation |
+| POST | `/api/score/broken_promise` | bearer | Real-time broken-promise risk score |
+| GET | `/api/score/broken_promise/card` | — | Public broken-promise model card |

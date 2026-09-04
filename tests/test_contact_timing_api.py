@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.core.security import require_api_key
 from app.db.session import get_db
 from app.main import app
 from app.services import contact_timing
@@ -43,6 +44,7 @@ def stubbed_app(monkeypatch):
 
     monkeypatch.setattr(repository, "get_customer", _customer_row)
     app.dependency_overrides[get_db] = _no_db
+    app.dependency_overrides[require_api_key] = lambda: None
     contact_timing.clear_timing_cache()
     yield app
     app.dependency_overrides.clear()

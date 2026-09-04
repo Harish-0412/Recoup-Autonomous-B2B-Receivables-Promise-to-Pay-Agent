@@ -10,8 +10,10 @@ Verifies:
 
 from __future__ import annotations
 
-import pytest
 import httpx
+import pytest
+
+from app.core.security import require_api_key
 from app.main import app
 from scripts.etl.broken_promise_etl import (
     FEATURE_COLUMNS,
@@ -19,8 +21,8 @@ from scripts.etl.broken_promise_etl import (
 )
 from src.agent.promise_handler import (
     build_broken_promise_features,
-    score_broken_promise,
     get_onnx_session,
+    score_broken_promise,
 )
 
 
@@ -102,25 +104,38 @@ def test_graceful_degradation() -> None:
 @pytest.mark.asyncio
 async def test_fastapi_endpoints() -> None:
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-        # POST /api/score/broken_promise
-        res = await client.post("/api/score/broken_promise", json={
+        # POST /api/score/broken_promise without credentials must fail with 401 or 503
+        anon_res = await client.post("/api/score/broken_promise", json={
             "customer_broken_promise_rate": 0.05,
             "customer_on_time_ratio_90d": 0.92,
             "days_overdue_at_scoring": 4,
             "promise_horizon_days": 3,
         })
-        assert res.status_code == 200
-        body = res.json()
-        assert "risk_score" in body
-        assert body["risk_tier"] in ("LOW", "MEDIUM", "HIGH")
-        assert "recommendation" in body
-        assert body["model_version"] == "v1.0.0"
-        assert len(body["features_used"]) == 19
+        assert anon_res.status_code in (401, 503)
 
-        # GET /api/score/broken_promise/card
+        # GET /api/score/broken_promise/card is intentionally public
         card_res = await client.get("/api/score/broken_promise/card")
         assert card_res.status_code == 200
         card = card_res.json()
         assert card["model_name"] == "broken_promise_risk_scorer"
         assert "metrics" in card
         assert card["metrics"]["roc_auc"] > 0.85
+
+        # Authenticated POST /api/score/broken_promise succeeds
+        app.dependency_overrides[require_api_key] = lambda: None
+        try:
+            res = await client.post("/api/score/broken_promise", json={
+                "customer_broken_promise_rate": 0.05,
+                "customer_on_time_ratio_90d": 0.92,
+                "days_overdue_at_scoring": 4,
+                "promise_horizon_days": 3,
+            })
+            assert res.status_code == 200
+            body = res.json()
+            assert "risk_score" in body
+            assert body["risk_tier"] in ("LOW", "MEDIUM", "HIGH")
+            assert "recommendation" in body
+            assert body["model_version"] == "v1.0.0"
+            assert len(body["features_used"]) == 19
+        finally:
+            app.dependency_overrides.pop(require_api_key, None)

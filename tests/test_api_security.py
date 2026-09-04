@@ -129,6 +129,11 @@ PROTECTED = [
     ("GET", "/api/v1/replies/review"),
     ("POST", "/api/v1/replies/r1/reviewed"),
     ("POST", "/api/v1/replies/classify-preview"),
+    ("GET", "/api/v1/schedule/next_time?customer_id=C-1"),
+    ("POST", "/api/score/broken_promise"),
+    ("POST", "/api/v1/score/broken_promise"),
+    ("GET", "/api/v1/forecast/cash"),
+    ("GET", "/api/v1/drift/flags"),
 ]
 
 
@@ -165,6 +170,23 @@ async def test_operator_key_opens_a_db_free_route(async_client, operator_key):
 async def test_health_stays_public(async_client, operator_key):
     response = await async_client.get("/api/v1/health")
     assert response.status_code == 200
+
+
+PUBLIC_MODEL_CARDS = [
+    "/api/v1/models/recovery/card",
+    "/api/v1/models/drift/card",
+    "/api/v1/models/timing/card",
+    "/api/score/broken_promise/card",
+    "/api/v1/score/broken_promise/card",
+]
+
+
+@pytest.mark.asyncio
+async def test_model_cards_stay_public(async_client, operator_key):
+    """Model cards are public evidence and must answer 200 without bearer tokens."""
+    for path in PUBLIC_MODEL_CARDS:
+        response = await async_client.get(path)
+        assert response.status_code == 200, f"GET {path} failed with {response.status_code}"
 
 
 # --- rate limits -----------------------------------------------------------------

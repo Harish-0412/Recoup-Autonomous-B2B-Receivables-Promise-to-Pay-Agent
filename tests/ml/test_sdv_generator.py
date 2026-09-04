@@ -4,6 +4,9 @@ from pathlib import Path
 
 import pytest
 
+pytest.importorskip("sdmetrics")
+pytest.importorskip("sdv")
+
 from src.data.sdv_generator import (
     RecoupSDVSynthesizer,
     batch_to_dataframe,
