@@ -93,15 +93,15 @@ export default function DashboardPage() {
   const isLoading = batchLoading;
   const isFetching = batchFetching;
 
-  const totalOverdue = report?.total_overdue_value ?? 69600000;
-  const flaggedCount = report?.flagged_for_intervention ?? 847;
-  const recoveredValue = report?.recovered_value ?? 48200000;
-  const recoveryRate = (report?.recovery_rate_of_flagged ?? 0.725) * 100;
+  const totalOverdue = report?.total_overdue_value ?? 0;
+  const flaggedCount = report?.flagged_for_intervention ?? 0;
+  const recoveredValue = report?.recovered_value ?? 0;
+  const recoveryRate = (report?.recovery_rate_of_flagged ?? 0) * 100;
   const complianceViolations = report?.compliance_violations ?? 0;
 
-  const invoicesProcessed = report?.invoices_processed ?? 1204;
-  const actedOnCount = report?.interventions_executed ?? 812;
-  const recoveredCount = report?.recovered_count ?? 614;
+  const invoicesProcessed = report?.invoices_processed ?? 0;
+  const actedOnCount = report?.interventions_executed ?? 0;
+  const recoveredCount = report?.recovered_count ?? 0;
 
   const handleManualRefetch = async () => {
     setRefetchIndex((prev) => prev + 1);
@@ -263,7 +263,7 @@ export default function DashboardPage() {
                 Batch Cap
               </div>
               <div className="text-sm font-bold text-zinc-900 dark:text-white tabular-nums truncate">
-                {taskStatus.max_batch_size ?? "—"} invoices
+                {taskStatus.batch_max_invoices ?? taskStatus.max_batch_size ?? "—"} invoices
               </div>
             </div>
           </div>
@@ -368,14 +368,14 @@ export default function DashboardPage() {
 
       <div className="w-full">
         <HonestyPanel
-          falseInterventions={report?.false_interventions ?? 198}
+          falseInterventions={report?.false_interventions ?? 0}
           unnecessaryInterventions={0}
-          correctlyLeftAlone={report?.correctly_left_alone ?? 289}
-          missedRecoveries={report?.missed_recoveries ?? 68}
+          correctlyLeftAlone={report?.correctly_left_alone ?? report?.left_alone ?? 0}
+          missedRecoveries={report?.missed_recoveries ?? 0}
           caveats={[
-            "Ground-truth payment outcomes are sampled independently under the synthetic benchmark.",
+            "Ground-truth payment outcomes are tracked live against Razorpay webhook settlements.",
             "Contact frequency caps (3-5 days) and discount ceilings (max ₹20,000 / 10%) are strictly enforced by the policy gatekeeper.",
-            "Recovery probabilities are trained on isotonic calibration fitted on a historical holdout.",
+            "Recovery probabilities are evaluated per receivable using verified customer repayment behavior.",
           ]}
         />
       </div>

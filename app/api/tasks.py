@@ -22,6 +22,8 @@ an open way to mail an entire customer book.
 
 from __future__ import annotations
 
+from contextlib import suppress
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,8 +32,15 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.security import require_task_key
 from app.db.session import get_db
+from app.models.tables import BatchRunRecord
 from app.services import repository
-from app.services.batch_runner import BATCH_LOCK, RunSummary, run_batch_cycle, sweep_promises
+from app.services.batch_runner import (
+    BATCH_LOCK,
+    RunInvoiceDecision,
+    RunSummary,
+    run_batch_cycle,
+    sweep_promises,
+)
 from app.services.locks import advisory_lock
 from src.ml.versioning import utc_now
 
@@ -43,9 +52,39 @@ router = APIRouter(
 logger = get_logger(__name__)
 
 
+def _record_to_summary(record: BatchRunRecord) -> RunSummary:
+    decisions: list[RunInvoiceDecision] = []
+    for d in record.invoice_decisions or []:
+        # A stored decision that no longer validates against the current
+        # schema is skipped, not fatal: history must stay readable.
+        with suppress(Exception):
+            decisions.append(RunInvoiceDecision(**d))
+    return RunSummary(
+        run_id=record.run_id,
+        started_at=record.started_at,
+        finished_at=record.finished_at,
+        ran=record.ran,
+        skipped_reason=record.skipped_reason,
+        promises_checked=record.promises_checked,
+        promises_broken=record.promises_broken,
+        promises_kept=record.promises_kept,
+        invoices_considered=record.invoices_considered,
+        scored=record.scored,
+        acted=record.acted,
+        blocked_by_policy=record.blocked_by_policy,
+        left_alone=record.left_alone,
+        delivery_failed=record.delivery_failed,
+        handed_off=record.handed_off,
+        sending_halted=record.sending_halted,
+        errors=record.errors or [],
+        invoice_decisions=decisions,
+    )
+
+
 @router.post("/run-batch", response_model=RunSummary)
 async def run_batch(
     limit: int | None = Query(default=None, gt=0, description="Override the batch cap"),
+    dry_run: bool | None = Query(default=None, description="Override dry run execution mode"),
     db: AsyncSession = Depends(get_db),
 ) -> RunSummary:
     """Run one autonomous cycle over the open book.
@@ -83,14 +122,41 @@ async def run_batch(
             sending_enabled=settings.SENDING_ENABLED,
             ledger=ledger,
             summary=summary,
+            dry_run=dry_run,
         )
 
         await repository.persist_ledger(db, ledger)
+
+        # Persist batch run record and per-invoice decision breakdown
+        summary.finished_at = utc_now().isoformat()
+        record = BatchRunRecord(
+            run_id=summary.run_id,
+            started_at=summary.started_at,
+            finished_at=summary.finished_at,
+            ran=summary.ran,
+            skipped_reason=summary.skipped_reason,
+            promises_checked=summary.promises_checked,
+            promises_broken=summary.promises_broken,
+            promises_kept=summary.promises_kept,
+            invoices_considered=summary.invoices_considered,
+            scored=summary.scored,
+            acted=summary.acted,
+            blocked_by_policy=summary.blocked_by_policy,
+            left_alone=summary.left_alone,
+            delivery_failed=summary.delivery_failed,
+            handed_off=summary.handed_off,
+            sending_halted=summary.sending_halted,
+            errors=summary.errors,
+            invoice_decisions=[d.model_dump() for d in summary.invoice_decisions],
+        )
+        await repository.save_batch_run(db, record)
         await db.commit()
 
-    summary.finished_at = utc_now().isoformat()
+    if not summary.finished_at:
+        summary.finished_at = utc_now().isoformat()
     logger.info(
         "Batch run complete",
+        run_id=summary.run_id,
         promises_checked=summary.promises_checked,
         promises_broken=summary.promises_broken,
         invoices_considered=summary.invoices_considered,
@@ -102,8 +168,28 @@ async def run_batch(
         handed_off=summary.handed_off,
         sending_halted=summary.sending_halted,
         errors=len(summary.errors),
+        decisions=len(summary.invoice_decisions),
     )
     return summary
+
+
+@router.get("/runs/latest", response_model=RunSummary | None)
+async def get_latest_run(db: AsyncSession = Depends(get_db)) -> RunSummary | None:
+    """Retrieve the latest completed autonomous batch run with its live decision items."""
+    record = await repository.get_latest_batch_run(db)
+    if record is None:
+        return None
+    return _record_to_summary(record)
+
+
+@router.get("/runs", response_model=list[RunSummary])
+async def list_past_runs(
+    limit: int = Query(default=10, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+) -> list[RunSummary]:
+    """List historical autonomous runs, most recent first."""
+    records = await repository.list_batch_runs(db, limit=limit)
+    return [_record_to_summary(r) for r in records]
 
 
 @router.get("/status")
@@ -121,6 +207,7 @@ async def task_status(db: AsyncSession = Depends(get_db)) -> dict:
     for_review = await repository.replies_needing_review(db, limit=500)
 
     return {
+        "business_id": settings.BUSINESS_ID,
         "sending_enabled": settings.SENDING_ENABLED,
         "dry_run": settings.DRY_RUN,
         "batch_max_invoices": settings.BATCH_MAX_INVOICES,

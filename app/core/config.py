@@ -190,6 +190,23 @@ class Settings(BaseSettings):
         default="",
         description="Bearer token the cron trigger must present",
     )
+    #: Operator bearer token for dashboard/read-write API routes. When empty,
+    #: those routes fall back to TASK_API_KEY so a single-operator deploy
+    #: needs only one secret. Documented separately so a larger team can
+    #: rotate dashboard access without touching the cron secret.
+    API_KEY: str = Field(
+        default="",
+        description="Bearer token for operator API routes (falls back to TASK_API_KEY)",
+    )
+    #: Per-IP sliding-window caps for unauthenticated-touchable endpoints
+    #: (ingest + both webhooks). Process-local; a multi-replica deploy
+    #: should put a shared limiter (Redis) in front. See app/core/ratelimit.py.
+    RATE_LIMIT_PER_MINUTE: int = Field(default=60, ge=1, le=1000)
+    #: Single-tenant identifier, reserved for the future multi-tenant path.
+    #: v1 is deliberately single-tenant (see docs/tenancy.md); this value is
+    #: recorded on batch-run records and surfaced in /tasks/status so a later
+    #: tenancy migration has a stable owner key to split on.
+    BUSINESS_ID: str = Field(default="default")
     #: Most invoices one triggered run may touch. A cron that fires while the
     #: previous run is still going should find a bounded amount of work, not a
     #: whole book.
@@ -293,6 +310,8 @@ class Settings(BaseSettings):
         install could not import ``app.models`` at all.
         """
         url = self.DATABASE_URL
+        if url.startswith("sqlite://"):
+            return "sqlite+aiosqlite://" + url[len("sqlite://") :]
         for prefix in ("postgresql+asyncpg://", "postgresql://", "postgres://"):
             if url.startswith(prefix):
                 return "postgresql+psycopg://" + url[len(prefix) :]

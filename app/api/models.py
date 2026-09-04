@@ -94,7 +94,14 @@ _FALLBACK_BINS: list[dict] = [
     {"lower": 0.3, "upper": 0.4, "count": 118, "predicted": 0.345, "observed": 0.314, "gap": 0.032},
     {"lower": 0.6, "upper": 0.7, "count": 247, "predicted": 0.647, "observed": 0.599, "gap": 0.047},
     {"lower": 0.7, "upper": 0.8, "count": 173, "predicted": 0.775, "observed": 0.763, "gap": 0.012},
-    {"lower": 0.8, "upper": 0.9, "count": 287, "predicted": 0.887, "observed": 0.909, "gap": -0.023},
+    {
+        "lower": 0.8,
+        "upper": 0.9,
+        "count": 287,
+        "predicted": 0.887,
+        "observed": 0.909,
+        "gap": -0.023,
+    },
 ]
 
 _FALLBACK_HEAD_TO_HEAD: dict = {
@@ -139,8 +146,8 @@ def _artifact_model_version() -> str | None:
     """Latest trained recovery-model version, if an artifact exists."""
 
     try:
-        from src.ml.recovery.artifacts import MODEL_NAME
         from src.ml.artifacts import LATEST_FILENAME
+        from src.ml.recovery.artifacts import MODEL_NAME
 
         settings = MLSettings()
         latest = settings.ml_artifacts_dir / MODEL_NAME / LATEST_FILENAME
@@ -153,7 +160,8 @@ def _artifact_model_version() -> str | None:
 
 def _read_json(path: Path) -> dict | None:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
     except Exception as exc:
         logger.debug("Could not read model artifact JSON", path=str(path), error=str(exc))
         return None
@@ -171,13 +179,9 @@ def _card_from_model_card_json(payload: dict) -> RecoveryCardOut | None:
             test_rows=int(payload.get("test_rows", 856)),
             source="model_card.json",
             results=[RecoveryModelRow(**row) for row in payload.get("results", [])],
-            calibration_bins=[
-                CalibrationBinOut(**b) for b in payload.get("calibration_bins", [])
-            ],
+            calibration_bins=[CalibrationBinOut(**b) for b in payload.get("calibration_bins", [])],
             head_to_head=(
-                HeadToHeadOut(**payload["head_to_head"])
-                if payload.get("head_to_head")
-                else None
+                HeadToHeadOut(**payload["head_to_head"]) if payload.get("head_to_head") else None
             ),
             global_importance=[
                 ShapImportanceOut(**item) for item in payload.get("global_importance", [])
@@ -233,8 +237,7 @@ def _card_from_evaluation_report(payload: dict) -> RecoveryCardOut | None:
             challenger_value_at_risk_at_k=h2h["challenger_value_at_risk_at_k"],
             incumbent_value_at_risk_at_k=h2h["incumbent_value_at_risk_at_k"],
             value_delta=round(
-                h2h["challenger_value_at_risk_at_k"]
-                - h2h["incumbent_value_at_risk_at_k"],
+                h2h["challenger_value_at_risk_at_k"] - h2h["incumbent_value_at_risk_at_k"],
                 2,
             ),
             k=h2h["k"],

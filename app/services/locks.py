@@ -20,6 +20,7 @@ finished, which is the double-send this exists to prevent, merely delayed.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -30,6 +31,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+_MEM_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+def _get_mem_lock(name: str) -> asyncio.Lock:
+    if name not in _MEM_LOCKS:
+        _MEM_LOCKS[name] = asyncio.Lock()
+    return _MEM_LOCKS[name]
 
 
 def lock_key(name: str) -> int:
@@ -58,6 +67,23 @@ async def advisory_lock(session: AsyncSession, name: str) -> AsyncIterator[bool]
     the surrounding transaction: a commit part-way through a batch must not
     quietly drop it.
     """
+
+    bind = session.get_bind()
+    if bind.dialect.name != "postgresql":
+        mem_lock = _get_mem_lock(name)
+        if mem_lock.locked():
+            logger.info("Local lock is held elsewhere; skipping", lock=name)
+            yield False
+            return
+        await mem_lock.acquire()
+        logger.debug("Local advisory lock acquired", lock=name)
+        try:
+            yield True
+        finally:
+            if mem_lock.locked():
+                mem_lock.release()
+            logger.debug("Local advisory lock released", lock=name)
+        return
 
     key = lock_key(name)
     result = await session.execute(text("SELECT pg_try_advisory_lock(:key)"), {"key": key})

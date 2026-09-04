@@ -60,6 +60,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="delete existing invoices and customers first",
     )
+    parser.add_argument(
+        "--email-base",
+        type=str,
+        default=None,
+        help="Base email for Gmail plus-addressing (e.g. harish0421mw@gmail.com)",
+    )
     return parser
 
 
@@ -80,7 +86,9 @@ def _channel(raw: str) -> ContactChannel:
         return ContactChannel.EMAIL
 
 
-async def _upsert_customers(session: AsyncSession, generated) -> dict[str, Customer]:
+async def _upsert_customers(
+    session: AsyncSession, generated, *, email_base: str | None = None
+) -> dict[str, Customer]:
     existing = {
         customer.customer_id: customer
         for customer in (await session.scalars(select(Customer))).all()
@@ -91,9 +99,14 @@ async def _upsert_customers(session: AsyncSession, generated) -> dict[str, Custo
         customer = existing.get(record.customer_id) or Customer(customer_id=record.customer_id)
         customer.name = record.name
         customer.industry = record.industry
-        # A deliverable address the demo can actually send to, derived from the
-        # business ID so re-seeding does not churn it.
-        customer.email = f"ap+{record.customer_id.lower()}@example.invalid"
+        if email_base and "@" in email_base:
+            user_part, domain_part = email_base.split("@", 1)
+            if "+" in user_part:
+                user_part = user_part.split("+", 1)[0]
+            tag = record.customer_id.lower().replace("-", "_")
+            customer.email = f"{user_part}+{tag}@{domain_part}"
+        else:
+            customer.email = f"ap+{record.customer_id.lower()}@example.invalid"
         customer.preferred_channel = _channel(record.preferred_channel)
         customer.tenure_months = record.tenure_months
         customer.invoice_count = record.invoice_count
@@ -197,7 +210,7 @@ async def seed(args: argparse.Namespace) -> int:
             await session.flush()
             print("cleared existing customers and invoices")
 
-        customers = await _upsert_customers(session, batch.customers)
+        customers = await _upsert_customers(session, batch.customers, email_base=args.email_base)
         written = await _upsert_invoices(session, batch.invoices, customers, as_of=args.as_of)
         await session.commit()
 

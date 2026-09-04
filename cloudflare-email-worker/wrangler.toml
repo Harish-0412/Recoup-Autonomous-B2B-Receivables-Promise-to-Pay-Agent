@@ -1,0 +1,18 @@
+#:schema node_modules/wrangler/config-schema.json
+name = "recoup-email-worker"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+# The public URL of your Recoup backend (ngrok, Cloudflare Tunnel, or production domain)
+# IMPORTANT: Omit trailing slash. The worker appends /api/v1/replies automatically.
+BACKEND_URL = "https://your-backend-url.ngrok-free.app"
+
+# Set to "true" to log payload previews in `wrangler tail` for debugging
+LOG_PAYLOAD = "false"
+
+# WEBHOOK_SECRET is stored securely as a Cloudflare Worker secret, NOT plaintext in this file.
+# Set it with:
+#   npx wrangler secret put WEBHOOK_SECRET
+# (Must match RESEND_WEBHOOK_SECRET in your backend .env file)

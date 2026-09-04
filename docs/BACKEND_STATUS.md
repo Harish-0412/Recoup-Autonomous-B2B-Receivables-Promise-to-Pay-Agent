@@ -5,7 +5,7 @@ progress, and what is left. Written against the code on `main`, not against
 intentions — every "done" below was verified by running it, and the way it was
 verified is stated so you can re-run it.
 
-Last updated: 2026-09-03 · Phases 0–4 of the eight-phase backend plan complete.
+Last updated: 2026-09-04 · Phases 0–5 of the eight-phase backend plan complete.
 
 ---
 
@@ -17,13 +17,13 @@ Last updated: 2026-09-03 · Phases 0–4 of the eight-phase backend plan complet
 | 01 | One source of schema truth | ✅ **Done** | Empty DB → `upgrade head` → `downgrade base` → `upgrade head`, all 3 migrations |
 | 02 | Wire the executor | ✅ **Done** | Real Razorpay link `plink_TXVSdg7K0skWhG` created and fetched back |
 | 03 | Close the promise loop | ✅ **Done** | "we will clear this by Friday" → promise row with parsed date |
-| 04 | Make it autonomous | ✅ **Done** | 5 concurrent triggers → exactly 1 run, 0 duplicate contacts |
-| 05 | Guard the perimeter | 🟡 **Partial** | Task endpoints authenticated; the rest of the API is still open |
-| 06 | Test the layer that talks to the world | 🔴 **Not started** | 552 tests, but the HTTP layer is still thinly covered |
-| 07 | Ship it | 🔴 **Not started** | No Dockerfile, no release command, no host config |
+| 04 | Make it autonomous | ✅ **Done** | 5 concurrent triggers → exactly 1 run, 0 duplicate contacts; external cron ships (Actions + Render) |
+| 05 | Guard the perimeter | ✅ **Done** | All operator routes bearer-locked, rate-limited, 16-test perimeter suite |
+| 06 | Test the layer that talks to the world | 🟡 **Partial** | API perimeter covered; provider-bound failure paths still thin |
+| 07 | Ship it | 🟡 **Partial** | Dockerfile + Render blueprint + runbook land; no live deploy yet |
 
-**Health:** 552 tests passing · `ruff check` clean · `ruff format` clean ·
-`mypy app/` clean (44 source files).
+**Health:** 593 tests passing · `ruff check` clean · `ruff format` clean ·
+`mypy app/` clean (51 source files).
 
 ---
 
@@ -197,73 +197,72 @@ Each of these lived in code that had never actually executed.
 
 ## 4. What is in progress
 
-### Phase 5 — Guard the perimeter 🟡
+### Phase 5 — Guard the perimeter ✅
 
-**Partially done, and the done half was pulled forward out of necessity.** The
-task endpoints send real email, so an unauthenticated trigger is an
-unauthenticated way to mail an entire customer book — they could not wait.
+**Done 2026-09-04.** The remaining open routes are closed, and the one
+regression this phase caught is worth stating plainly: an uncommitted change
+had widened `require_task_key` to accept `RAZORPAY_KEY_ID` and two hardcoded
+dev strings, so the publishable half of the Razorpay pair unlocked the task
+endpoints and an unconfigured deploy answered 401 instead of the documented
+503. `test_an_unconfigured_key_denies_rather_than_allows` caught it; the fix
+removes every fallback from the code (the only credential source is
+`TASK_API_KEY`, with `API_KEY` as an optional dashboard alias), rotates the
+leaked value out of `.env`, and strips the same string from the frontend and
+`frontend/.env.local`.
 
-Already landed:
+What landed:
 
-- Bearer-token auth on `/api/v1/tasks/*`, constant-time comparison, and an
-  **unset key denies rather than allows**.
-- `DEBUG` defaults to `False` — it used to default `True`, so an unconfigured
-  deploy published `/docs` and widened CORS. Deliberately *not* derived from
-  `APP_ENV`, because `APP_ENV` itself defaults to `"development"` and deriving it
-  restores the bug exactly.
-- `CORS_ORIGINS` replaces the `"*"` branch, which browsers reject anyway when
-  paired with `allow_credentials`.
-- Production refuses to boot while any secret still holds its placeholder.
+- Bearer-token auth on **every** operator route (`invoices/*`, `reports/*`,
+  `policy/*`, `replies/review`, `replies/*/reviewed`,
+  `replies/classify-preview`) via `require_api_key`, which falls back to
+  `TASK_API_KEY` so a single-operator deploy needs one secret. Health and
+  the recovery model card stay public; both webhooks stay signature-authed.
+- **Rate limiting** (`app/core/ratelimit.py`, `RATE_LIMIT_PER_MINUTE=60`):
+  per-IP sliding windows on ingest and both webhooks, 429 + `Retry-After`
+  instead of falling over. Process-local by design — documented as such.
+- **Multi-tenancy decided:** deliberately single-tenant in v1, recorded in
+  `docs/tenancy.md` with the migration cost spelled out. `BUSINESS_ID`
+  reserves the owner key; `/tasks/status` surfaces it.
+- `tests/test_api_security.py`: 16 tests asserting 401-without-key on all 11
+  protected route shapes, 401-for-publishable-ID, 503-when-unconfigured,
+  and limiter window semantics.
+- Frontend sends the operator key on every call (`operatorHeaders()` backed
+  by tab-session + env) and ships no credential fallback.
 
-Still open:
-
-- **Every other route is unauthenticated** — including `POST /invoices/batch`
-  and `POST /invoices/{id}/run-cycle`.
-- **No rate limiting** on ingest or the reply webhook.
-- **Multi-tenancy is undecided.** Either add `business_id` to the tables now and
-  scope every repository query, or document single-tenant as a deliberate scope
-  choice. Retrofitting tenancy across seven tables later is far more expensive
-  than adding it now — this is the one open decision that gets costlier by the
-  day.
+Still open (accepted, not overlooked): per-tenant credentials arrive with
+tenancy itself; the limiter is per-process until a shared one is deployed.
 
 ---
 
 ## 5. What remains
 
-### Phase 6 — Test the layer that talks to the world 🔴 · ~1 day
+### Phase 6 — Test the layer that talks to the world 🟡
 
-552 tests, and the HTTP layer is still the thinnest part. Every bug in section 3
-lived there.
+The HTTP perimeter is now covered (`tests/test_api_security.py`: auth on all
+11 protected route shapes, backdoor refusal, 503 semantics, limiter windows),
+and every bug in section 3's list would have been caught one layer earlier.
+What remains is provider-bound failure-path depth: webhook replay
+idempotency under concurrency, `run-cycle` trace/contact atomicity, and a
+failed send not advancing the ladder — all still exercised by hand, not by
+test. Coverage gates on `app/api` and `app/services` are the remaining item.
 
-- Real Postgres in CI (already a service container) rather than SQLite — the
-  schema uses Postgres enums and the migrations must be exercised.
-- Each test in a transaction, rolled back, so tests share one schema and stay
-  independent.
-- Cover the paths that carry money or promises: webhook replay is idempotent,
-  bad signatures rejected, `run-cycle` persists trace and contact atomically, a
-  failed send does not advance the ladder, protected routes 401.
-- Fake the providers at the client boundary so no test touches the network.
-- Coverage gates on `app/api` and `app/services`.
+### Phase 7 — Ship it 🟡
 
-**Done when:** API and service coverage clears 80%, and the executor's failure
-paths are tested as thoroughly as its happy path.
+The provable-to-an-outsider half is landed; the running-somewhere half is
+not:
 
-### Phase 7 — Ship it 🔴 · ~1 day
-
-Nothing above is provable to an outsider until it runs somewhere with a public
-URL — which both webhooks require.
-
-- Multi-stage Dockerfile on `python:3.11-slim`, non-root, no build toolchain in
-  the final layer.
-- Release command runs `alembic upgrade head`; web process runs Uvicorn.
-- Health checks at the existing `/api/v1/health`.
-- Render or Railway + Neon Postgres — both give the HTTPS URL the webhooks need.
-- Register live webhook URLs with Razorpay and Resend; set CORS to the real
-  frontend origin.
-- Request-ID middleware feeding the existing structlog setup; Sentry for
-  unhandled errors.
-- `docs/runbook.md`: environment variables, first deploy, rotating a leaked key,
-  replaying a failed webhook.
+- Multi-stage `Dockerfile` on `python:3.11-slim`, non-root, no build
+  toolchain in the final layer. Release runs `alembic upgrade head`; the web
+  process runs Uvicorn; health checks hit `/api/v1/health`.
+- `render.yaml` blueprint (web + Postgres + optional cron) and the GitHub
+  `scheduler` workflow (every 15 min, `workflow_dispatch` for manual runs).
+  Enable ONE scheduler, not both. `scripts/trigger_batch.py` is the local
+  form of the same call for pre-schedule smoke tests.
+- `docs/runbook.md`: first deploy, rotating a leaked key, replaying a failed
+  webhook, the kill switch, rate limits.
+- `aiosqlite` declared in `pyproject.toml` so SQLite dev/test installs work
+  from a clean clone; `.env.example` documents every Razorpay / Resend / LLM
+  key plus the new `API_KEY`, `RATE_LIMIT_PER_MINUTE`, `BUSINESS_ID`.
 
 **Done when:** a clean clone deploys green, a test-mode payment on the live URL
 closes an invoice end to end, and a reply to a sent reminder creates a promise —
@@ -330,17 +329,21 @@ curl localhost:8000/api/v1/tasks/status -H "Authorization: Bearer $TASK_API_KEY"
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | GET | `/api/v1/health` | — | Liveness |
-| POST | `/api/v1/invoices/batch` | ⚠️ none | Ingest customers and invoices |
-| GET | `/api/v1/invoices/{id}` | ⚠️ none | Current state and promises |
-| GET | `/api/v1/invoices/{id}/audit` | ⚠️ none | Hash-chained decision trail |
-| POST | `/api/v1/invoices/{id}/run-cycle` | ⚠️ none | One decision cycle, executed |
-| POST | `/api/v1/webhooks/razorpay` | signature | Payment confirmation |
-| POST | `/api/v1/replies` | signature | Inbound customer reply |
-| GET | `/api/v1/replies/review` | ⚠️ none | Human review queue |
-| POST | `/api/v1/replies/{id}/reviewed` | ⚠️ none | Clear one from the queue |
+| POST | `/api/v1/invoices/batch` | bearer + rate-limit | Ingest customers and invoices |
+| GET | `/api/v1/invoices` | bearer | Work-queue list |
+| GET | `/api/v1/invoices/{id}` | bearer | Current state and promises |
+| GET | `/api/v1/invoices/{id}/audit` | bearer | Hash-chained decision trail |
+| POST | `/api/v1/invoices/{id}/run-cycle` | bearer | One decision cycle, executed |
+| POST | `/api/v1/webhooks/razorpay` | signature + rate-limit | Payment confirmation |
+| POST | `/api/v1/replies` | signature + rate-limit | Inbound customer reply |
+| POST | `/api/v1/replies/classify-preview` | bearer | Side-effect-free classify box |
+| GET | `/api/v1/replies/review` | bearer | Human review queue |
+| POST | `/api/v1/replies/{id}/reviewed` | bearer | Clear one from the queue |
 | POST | `/api/v1/tasks/run-batch` | bearer | Autonomous run |
 | GET | `/api/v1/tasks/status` | bearer | Kill switch and queue depths |
-| GET | `/api/v1/reports/batch` | ⚠️ none | In-memory batch report |
-| GET | `/api/v1/policy` | ⚠️ none | Active policy configuration |
-
-⚠️ marks routes that phase 5 still has to close.
+| GET | `/api/v1/tasks/runs/latest` | bearer | Latest run summary |
+| GET | `/api/v1/tasks/runs` | bearer | Run history |
+| GET | `/api/v1/reports/batch` | bearer | In-memory batch report |
+| GET | `/api/v1/policy` | bearer | Active policy configuration |
+| POST | `/api/v1/policy/simulate` | bearer | Counterfactual replay (501: not built) |
+| GET | `/api/v1/models/recovery/card` | — | Public model evidence |

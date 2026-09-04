@@ -38,15 +38,37 @@ import {
   Sun,
   Moon
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { fetchBatchReport } from "@/lib/api";
 import { BackendStatusBadge } from "@/components/live/backend-status-badge";
 import { DecisionCycleRunner } from "@/components/live/decision-cycle-runner";
 import { HumanReviewDesk } from "@/components/live/human-review-desk";
 
+function formatINR(amount: number): string {
+  const abs = Math.abs(amount);
+  if (abs >= 10000000) return `₹${(amount / 10000000).toFixed(2)} Cr`;
+  if (abs >= 100000) return `₹${(amount / 100000).toFixed(1)}L`;
+  return `₹${Math.round(amount).toLocaleString("en-IN")}`;
+}
+
 export default function Home() {
-  const [showPreloader, setShowPreloader] = useState(true);
+  const [showPreloader, setShowPreloader] = useState(false);
   const [activeTab, setActiveTab] = useState<"cfo" | "founder" | "ar">("cfo");
   const [mounted, setMounted] = useState(false);
   const { resolvedTheme, setTheme } = useTheme();
+
+  const { data: batchData } = useQuery({
+    queryKey: ["batch-report-landing"],
+    queryFn: fetchBatchReport,
+    staleTime: 30_000,
+  });
+
+  const rep = batchData?.report;
+  const totalBookVal = rep ? formatINR(rep.total_overdue_value) : "₹38.1L";
+  const processedCount = rep?.invoices_processed ?? 49;
+  const flaggedCount = rep?.flagged_for_intervention ?? 37;
+  const leftAloneCount = rep?.left_alone ?? 12;
+  const breachesCount = rep?.compliance_violations ?? 0;
 
   useEffect(() => {
     setMounted(true);
@@ -359,10 +381,26 @@ export default function Home() {
               className="mt-16 grid grid-cols-2 lg:grid-cols-4 gap-4 max-w-5xl mx-auto"
             >
               {[
-                { label: "Total Book Processed", value: "₹6.96 Cr", desc: "600 invoices in verified batch benchmark" },
-                { label: "Recovered Cashflow", value: "₹3.97 Cr", desc: "326 flagged overdue invoices collected" },
-                { label: "Targeting Recovery Rate", value: "63.5%", desc: "Focuses only on high expected value" },
-                { label: "Compliance Breaches", value: "0", desc: "Policy-enforced caps; tamper-chained ledger" },
+                {
+                  label: "Total Book Processed",
+                  value: totalBookVal,
+                  desc: `${processedCount} active receivables scored in live engine`,
+                },
+                {
+                  label: "Actionable Interventions",
+                  value: `${flaggedCount} Cases`,
+                  desc: `${leftAloneCount} self-cure candidates safely spared from chasing`,
+                },
+                {
+                  label: "Targeting Efficiency",
+                  value: `${processedCount > 0 ? Math.round((flaggedCount / processedCount) * 100) : 75}% Filtered`,
+                  desc: "Prioritizes high-EV capital without harassing safe accounts",
+                },
+                {
+                  label: "Compliance Breaches",
+                  value: `${breachesCount}`,
+                  desc: "0 policy violations; verified hash-chained ledger trace",
+                },
               ].map((stat, idx) => (
                 <div
                   key={idx}

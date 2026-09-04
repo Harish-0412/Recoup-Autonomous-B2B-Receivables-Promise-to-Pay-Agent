@@ -35,6 +35,8 @@ def _engine_kwargs() -> dict[str, Any]:
     built separately rather than filtered.
     """
 
+    if settings.database_url_async.startswith("sqlite"):
+        return {"connect_args": {"check_same_thread": False}}
     if settings.DB_POOL_MODE == "null":
         return {"poolclass": NullPool}
     return {

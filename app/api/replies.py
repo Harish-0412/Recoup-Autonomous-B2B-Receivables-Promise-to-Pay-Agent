@@ -44,6 +44,8 @@ from app.core.audit import DecisionLedger, append_decision_trace
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.promise_tracker import PromiseRecord, extract_promise
+from app.core.ratelimit import limited_429_response
+from app.core.security import require_api_key
 from app.db.session import get_db
 from app.models import (
     Customer,
@@ -116,18 +118,33 @@ async def receive_reply(
     svix_id: str = Header(default="", alias="svix-id"),
     svix_timestamp: str = Header(default="", alias="svix-timestamp"),
     svix_signature: str = Header(default="", alias="svix-signature"),
+    x_worker_secret: str = Header(default="", alias="x-worker-secret"),
 ) -> JSONResponse:
-    """Receive one inbound customer reply from Resend."""
+    """Receive one inbound customer reply from Cloudflare Worker or Resend."""
+
+    throttled = await limited_429_response(
+        request, get_settings().RATE_LIMIT_PER_MINUTE, "reply-webhook"
+    )
+    if throttled is not None:
+        return throttled
 
     raw = await request.body()
+    active_settings = get_settings()
 
     verified, reason = verify_svix_signature(
         body=raw,
         message_id=svix_id,
         timestamp=svix_timestamp,
         signature_header=svix_signature,
-        secret=settings.RESEND_WEBHOOK_SECRET,
+        secret=active_settings.RESEND_WEBHOOK_SECRET,
     )
+    if not verified and x_worker_secret and active_settings.RESEND_WEBHOOK_SECRET:
+        import hmac
+
+        if hmac.compare_digest(x_worker_secret, active_settings.RESEND_WEBHOOK_SECRET):
+            verified = True
+            reason = "ok (worker secret header)"
+
     if not verified:
         # The reason is logged, never returned: telling an unauthenticated
         # caller *why* their forgery failed helps them make a better one.
@@ -179,7 +196,7 @@ async def receive_reply(
     body = _body_text(message)
     recipients = _recipients(message)
 
-    invoice_id = resolve_from_recipients(recipients, secret=settings.REPLY_ADDRESS_SECRET)
+    invoice_id = resolve_from_recipients(recipients, secret=active_settings.REPLY_ADDRESS_SECRET)
     invoice: Invoice | None = await repository.get_invoice(db, invoice_id) if invoice_id else None
     customer: Customer | None = None
     if invoice is not None:
@@ -399,7 +416,9 @@ async def _process(
     )
 
 
-@router.post("/classify-preview", response_model=ClassifyPreviewOut)
+@router.post(
+    "/classify-preview", response_model=ClassifyPreviewOut, dependencies=[Depends(require_api_key)]
+)
 async def classify_preview(payload: ClassifyPreviewIn) -> ClassifyPreviewOut:
     """Classify one reply text without any side effects.
 
@@ -465,7 +484,8 @@ async def classify_preview(payload: ClassifyPreviewIn) -> ClassifyPreviewOut:
     )
 
 
-@router.get("/review", response_model=ReplyReviewQueue)
+@router.get("/review", response_model=ReplyReviewQueue, dependencies=[Depends(require_api_key)])
+@router.get("/review-queue", response_model=ReplyReviewQueue, dependencies=[Depends(require_api_key)])
 async def review_queue(limit: int = 50, db: AsyncSession = Depends(get_db)) -> ReplyReviewQueue:
     """Replies waiting on a person, oldest first.
 
@@ -493,7 +513,11 @@ async def review_queue(limit: int = 50, db: AsyncSession = Depends(get_db)) -> R
     )
 
 
-@router.post("/{reply_id}/reviewed", status_code=status.HTTP_200_OK)
+@router.post(
+    "/{reply_id}/reviewed",
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_api_key)],
+)
 async def mark_reviewed(reply_id: str, db: AsyncSession = Depends(get_db)) -> JSONResponse:
     """Take one reply off the queue once a person has dealt with it."""
 

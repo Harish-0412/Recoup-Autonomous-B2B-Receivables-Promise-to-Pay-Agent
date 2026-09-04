@@ -18,6 +18,7 @@ from app.models.enums import (
     ReplyDisposition,
 )
 from app.models.tables import (
+    BatchRunRecord,
     ContactLog,
     Customer,
     DecisionTrace,
@@ -29,6 +30,7 @@ from app.models.tables import (
 )
 
 __all__ = [
+    "BatchRunRecord",
     "ContactChannel",
     "ContactLog",
     "Customer",

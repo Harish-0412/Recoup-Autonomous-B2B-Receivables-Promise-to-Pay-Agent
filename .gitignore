@@ -9,6 +9,11 @@ venv/
 
 # Local environment
 .env
+*.db
+*.sqlite3
+
+# Scratch space: local experiments, temp harnesses, throwaway caches.
+scratch/
 
 # ML artifacts: keep the directory, never commit trained binaries.
 src/ml/artifacts_store/*
@@ -32,3 +37,9 @@ data/recovery_model/
 # Coverage output
 .coverage
 coverage.xml
+
+# Cloudflare email worker: dependencies and real local secrets stay out.
+cloudflare-email-worker/node_modules/
+cloudflare-email-worker/.dev.vars
+cloudflare-email-worker/.wrangler/
+cloudflare-email-worker/dist/

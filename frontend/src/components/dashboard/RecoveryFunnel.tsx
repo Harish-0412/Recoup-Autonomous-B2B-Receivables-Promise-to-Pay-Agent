@@ -56,18 +56,20 @@ export function RecoveryFunnel({
     },
   ];
 
-  const funnelPercentages = data.map((d) => ({
-    ...d,
-    pctOfTop: ((d.value / invoicesProcessed) * 100).toFixed(1),
-    pctOfPrev:
-      d.name === "Processed"
-        ? "100"
-        : (
-            (d.value /
-              data[data.findIndex((x) => x.name === d.name) - 1].value) *
-            100
-          ).toFixed(0),
-  }));
+  const funnelPercentages = data.map((d) => {
+    const idx = data.findIndex((x) => x.name === d.name);
+    const prevVal = idx > 0 ? data[idx - 1].value : 0;
+    return {
+      ...d,
+      pctOfTop: invoicesProcessed > 0 ? ((d.value / invoicesProcessed) * 100).toFixed(1) : "0.0",
+      pctOfPrev:
+        d.name === "Processed"
+          ? "100"
+          : prevVal > 0
+          ? ((d.value / prevVal) * 100).toFixed(0)
+          : "0",
+    };
+  });
 
   return (
     <motion.div

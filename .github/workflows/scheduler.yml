@@ -1,0 +1,65 @@
+name: Scheduler (autonomous run-batch trigger)
+
+# The schedule lives OUTSIDE the app process on purpose: an in-process
+# scheduler double-fires the moment a second replica starts. This workflow is
+# the default external cron -- every 15 minutes it calls the one endpoint the
+# app exposes for that purpose. Overlap is safe: a run holds a Postgres
+# advisory lock and a concurrent trigger is a no-op, not a double-send.
+#
+# Required secrets:
+#   RECOUP_API_URL  e.g. https://recoup-api.onrender.com
+#   TASK_API_KEY    the same value the API boots with
+#
+# Manual trigger: "Run workflow" in the Actions tab, optionally overriding
+# the batch cap (inputs.limit).
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Override BATCH_MAX_INVOICES for this run"
+        required: false
+        default: ""
+
+jobs:
+  trigger:
+    name: Trigger run-batch
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger autonomous batch run
+        env:
+          RECOUP_API_URL: ${{ secrets.RECOUP_API_URL }}
+          TASK_API_KEY: ${{ secrets.TASK_API_KEY }}
+          LIMIT: ${{ inputs.limit }}
+        run: |
+          if [ -z "$RECOUP_API_URL" ] || [ -z "$TASK_API_KEY" ]; then
+            echo "::error::Set RECOUP_API_URL and TASK_API_KEY secrets before enabling the scheduler."
+            exit 1
+          fi
+          URL="$RECOUP_API_URL/api/v1/tasks/run-batch"
+          if [ -n "$LIMIT" ]; then
+            URL="$URL?limit=$LIMIT"
+          fi
+          echo "Triggering $URL"
+          BODY_FILE="$(mktemp)"
+          HTTP_CODE="$(curl -fsS -o "$BODY_FILE" -w "%{http_code}" -X POST "$URL" \
+            -H "Authorization: Bearer $TASK_API_KEY" \
+            --max-time 300)" || {
+            echo "::error::Trigger request failed (curl exit $?). See logs."
+            cat "$BODY_FILE"
+            exit 1
+          }
+          echo "HTTP $HTTP_CODE"
+          cat "$BODY_FILE"
+          echo
+          if [ "$HTTP_CODE" = "503" ]; then
+            echo "::error::API reports TASK_API_KEY unconfigured (503). Set it on the service."
+            exit 1
+          fi
+          if [ "$HTTP_CODE" = "401" ]; then
+            echo "::error::API rejected the key (401). Rotate TASK_API_KEY secret to match."
+            exit 1
+          fi

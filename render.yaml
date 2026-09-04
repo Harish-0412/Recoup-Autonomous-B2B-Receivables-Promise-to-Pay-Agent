@@ -1,0 +1,76 @@
+# Render blueprint: API web service + release migration + external cron trigger.
+#
+# The cron calls POST /api/v1/tasks/run-batch every 15 minutes, exactly like
+# .github/workflows/scheduler.yml does. Enable ONE of the two, not both:
+# two schedulers each firing means every run contends on the advisory lock
+# (safe -- the loser is a no-op -- but noisy). GitHub Actions is the default;
+# uncomment the cron job below to use Render Cron instead.
+
+services:
+  - type: web
+    name: recoup-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    healthCheckPath: /api/v1/health
+    autoDeploy: true
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DEBUG
+        value: false
+      - key: DRY_RUN
+        value: true # flip deliberately when ready to send real mail
+      - key: DATABASE_URL
+        fromDatabase:
+          name: recoup-db
+          property: connectionString
+      - key: DB_POOL_MODE
+        value: null # client pool off behind Render's managed Postgres pooler
+      - key: TASK_API_KEY
+        generateValue: true # copy into the scheduler job / GitHub secret
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
+      - key: RESEND_WEBHOOK_SECRET
+        sync: false
+      - key: REPLY_INBOUND_DOMAIN
+        sync: false
+      - key: REPLY_ADDRESS_SECRET
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+
+databases:
+  - name: recoup-db
+    plan: starter
+    postgresMajorVersion: 15
+
+# --- optional Render Cron (alternative to the GitHub Action) ----------------
+# cronJobs:
+#   - name: recoup-scheduler
+#     runtime: image
+#     image:
+#       url: curlimages/curl:8.5.0
+#     schedule: "*/15 * * * *"
+#     command: >-
+#       sh -c 'curl -fsS -X POST "$RECOUP_API_URL/api/v1/tasks/run-batch"
+#       -H "Authorization: Bearer $TASK_API_KEY"'
+#     envVars:
+#       - key: RECOUP_API_URL
+#         fromService:
+#           name: recoup-api
+#           type: web
+#           property: host
+#       - key: TASK_API_KEY
+#         fromService:
+#           name: recoup-api
+#           type: web
+#           envVarKey: TASK_API_KEY

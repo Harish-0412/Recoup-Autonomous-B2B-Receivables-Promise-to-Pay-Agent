@@ -9,6 +9,7 @@ ships, the 501 assertions become 200 assertions against the same shapes.
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.core.config import get_settings
 from app.main import app
 
 
@@ -17,6 +18,17 @@ async def async_client():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
+
+
+@pytest.fixture
+def auth_headers(monkeypatch):
+    """Operator routes are bearer-locked; tests present the cron key."""
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("TASK_API_KEY", "the-cron-secret")
+    monkeypatch.delenv("API_KEY", raising=False)
+    yield {"Authorization": "Bearer the-cron-secret"}
+    get_settings.cache_clear()
 
 
 def _body(**overrides):
@@ -29,8 +41,16 @@ def _body(**overrides):
 
 
 @pytest.mark.asyncio
-async def test_simulate_valid_body_gets_honest_501(async_client: AsyncClient):
+async def test_simulate_without_a_key_is_refused(async_client: AsyncClient):
     response = await async_client.post("/api/v1/policy/simulate", json=_body())
+    assert response.status_code in (401, 503)
+
+
+@pytest.mark.asyncio
+async def test_simulate_valid_body_gets_honest_501(async_client: AsyncClient, auth_headers: dict):
+    response = await async_client.post(
+        "/api/v1/policy/simulate", json=_body(), headers=auth_headers
+    )
     assert response.status_code == 501
     detail = response.json()["detail"]
     assert detail["status"] == "not_implemented"
@@ -38,17 +58,17 @@ async def test_simulate_valid_body_gets_honest_501(async_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_simulate_rejects_out_of_range_ceiling(async_client: AsyncClient):
+async def test_simulate_rejects_out_of_range_ceiling(async_client: AsyncClient, auth_headers: dict):
     response = await async_client.post(
-        "/api/v1/policy/simulate", json=_body(discount_ceiling_pct=150.0)
+        "/api/v1/policy/simulate", json=_body(discount_ceiling_pct=150.0), headers=auth_headers
     )
     assert response.status_code == 422
 
 
 @pytest.mark.asyncio
-async def test_simulate_requires_replay_window(async_client: AsyncClient):
+async def test_simulate_requires_replay_window(async_client: AsyncClient, auth_headers: dict):
     response = await async_client.post(
-        "/api/v1/policy/simulate", json={"policy_overrides": {}}
+        "/api/v1/policy/simulate", json={"policy_overrides": {}}, headers=auth_headers
     )
     assert response.status_code == 422
 

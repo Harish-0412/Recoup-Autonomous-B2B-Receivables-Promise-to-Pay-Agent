@@ -12,16 +12,19 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.agent import AgentConfig, run_batch
 from app.core.audit import DecisionLedger
 from app.core.evaluation import build_report, format_inr
 from app.core.policy import policy_config_from_settings
+from app.core.security import require_api_key
 from app.db.session import get_db
+from app.models import Invoice
 from app.services import repository
 
-router = APIRouter(prefix="/reports", tags=["reports"])
+router = APIRouter(prefix="/reports", tags=["reports"], dependencies=[Depends(require_api_key)])
 
 
 @router.get("/batch")
@@ -46,6 +49,20 @@ async def batch_report(
         ledger=ledger,
     )
     report = build_report(results, ledger=ledger)
+
+    paid_stmt = select(
+        func.count(Invoice.id),
+        func.coalesce(func.sum(Invoice.amount_paid), 0.0),
+    ).where(Invoice.amount_paid > 0)
+    paid_res = await db.execute(paid_stmt)
+    paid_count, total_paid = paid_res.one()
+
+    report.recovered_count = int(paid_count or 0)
+    report.recovered_value = float(total_paid or 0.0)
+    if report.flagged_for_intervention > 0 and paid_count > 0:
+        report.recovery_rate_of_flagged = round(float(paid_count) / float(report.flagged_for_intervention), 4)
+    else:
+        report.recovery_rate_of_flagged = 0.0
 
     return {
         "dry_run": True,

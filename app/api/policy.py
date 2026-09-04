@@ -15,12 +15,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.policy import PolicyEngine, policy_config_from_settings
+from app.core.security import require_api_key
 from app.schemas.policy import PolicySimulateIn, PolicySimulateOut
 
-router = APIRouter(prefix="/policy", tags=["policy"])
+router = APIRouter(prefix="/policy", tags=["policy"], dependencies=[Depends(require_api_key)])
 
 
 @router.get("")

@@ -29,6 +29,7 @@ from app.core.audit import DecisionLedger, append_decision_trace
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.promise_tracker import assess_promise
+from app.core.ratelimit import limited_429_response
 from app.db.session import get_db
 from app.models import DecisionOutcome, InvoiceStatus, PromiseStatus, WebhookEvent
 from app.services import repository
@@ -71,6 +72,12 @@ async def razorpay_webhook(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     """Receive one Razorpay webhook delivery."""
+
+    throttled = await limited_429_response(
+        request, get_settings().RATE_LIMIT_PER_MINUTE, "razorpay-webhook"
+    )
+    if throttled is not None:
+        return throttled
 
     raw = await request.body()
 

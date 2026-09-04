@@ -34,7 +34,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import bind_logger, get_logger
-from app.models.enums import DeliveryStatus
+from app.models.enums import ContactChannel, DeliveryStatus
 from app.models.tables import Invoice
 from app.services import repository
 from app.services.executor import templates
@@ -129,7 +129,7 @@ class ExecutionService:
         await repository.record_contact(
             session,
             invoice,
-            channel=intent.channel,
+            channel=result.channel,
             ladder_step=intent.ladder_step,
             subject=result.subject or (message.subject if message else ""),
             body_preview=result.body_preview,
@@ -240,7 +240,7 @@ class ExecutionService:
         result = ExecutionResult(
             invoice_id=intent.invoice_id,
             status=(DeliveryStatus.SIMULATED if self.gateways.dry_run else DeliveryStatus.SENT),
-            channel=intent.channel,
+            channel=ContactChannel.EMAIL,
             ladder_step=intent.ladder_step,
             subject=message.subject,
             body_preview=message.preview(),
@@ -262,11 +262,13 @@ class ExecutionService:
         return result
 
 
-def build_execution_service(settings: Any | None = None) -> ExecutionService:
+def build_execution_service(
+    settings: Any | None = None, *, dry_run: bool | None = None
+) -> ExecutionService:
     """The executor the app uses, wired from configuration."""
 
     if settings is None:
         from app.core.config import get_settings
 
         settings = get_settings()
-    return ExecutionService(Gateways.for_settings(settings), settings=settings)
+    return ExecutionService(Gateways.for_settings(settings, dry_run=dry_run), settings=settings)

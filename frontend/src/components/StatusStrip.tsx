@@ -38,7 +38,7 @@ function StatusPill({ label, isLive, tooltip, href, dot = false }: StatusPillPro
   const content = (
     <motion.span
       layout
-      transition={{ type: "spring", stiffness: 400, damping: 25 }}
+      transition={pulse ? { duration: 0.4, ease: "easeInOut" } : { type: "spring", stiffness: 400, damping: 25 }}
       animate={pulse ? { scale: [1, 1.08, 1] } : { scale: 1 }}
       className={cn(
         "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-medium border tracking-wide whitespace-nowrap transition-colors select-none",

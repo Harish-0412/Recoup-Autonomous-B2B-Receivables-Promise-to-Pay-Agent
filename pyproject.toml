@@ -26,6 +26,10 @@ dependencies = [
     # importing app.models on a clean install raised ModuleNotFoundError.
     "sqlalchemy>=2.0.36",
     "psycopg[binary]>=3.2",
+    # aiosqlite: the async driver for local SQLite URLs
+    # (sqlite:///... -> sqlite+aiosqlite:///... in database_url_async).
+    # Without it every dev/test run on SQLite raises ModuleNotFoundError.
+    "aiosqlite>=0.20",
     # SQLAlchemy's asyncio bridge needs greenlet at runtime. It arrives
     # transitively today; naming it means an upgrade cannot quietly drop it.
     "greenlet>=3.0",

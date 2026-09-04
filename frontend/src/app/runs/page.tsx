@@ -25,14 +25,24 @@ import {
   TrendingUp,
   Server,
   Activity,
-  MinusCircle,
   BarChart3,
+  Search,
+  Filter,
+  ExternalLink,
+  ChevronDown,
+  ChevronUp,
+  Send,
+  UserCheck,
+  Sparkles,
 } from "lucide-react";
 import {
   fetchTaskStatusDetail,
   triggerBatchRunDetailed,
+  fetchLatestRun,
+  fetchPastRuns,
   TaskApiError,
   type RunSummary,
+  type RunInvoiceDecision,
   type TaskStatusResponse,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -40,6 +50,11 @@ import { cn } from "@/lib/utils";
 // ---------------------------------------------------------------------------
 // Helpers (pure)
 // ---------------------------------------------------------------------------
+
+function formatCurrency(n: number | null | undefined): string {
+  if (n == null) return "₹0";
+  return `₹${Math.round(n).toLocaleString("en-IN")}`;
+}
 
 const SESSION_KEY = "recoup-task-key";
 const SESSION_LAST_RUN = "recoup-last-run";
@@ -312,12 +327,14 @@ function StageNode({
 type StatusState = "locked" | "loading" | "ready" | "error";
 type RunState = "idle" | "confirm" | "running" | "done" | "error";
 
+const DEFAULT_TASK_KEY = process.env.NEXT_PUBLIC_TASK_API_KEY || "";
+
 export default function RunsPage() {
   const shouldReduce = useReducedMotion();
 
   // Task key lives in memory + sessionStorage (tab session only — never
   // localStorage, never a cookie, never logged).
-  const [taskKey, setTaskKey] = useState<string>(() => loadSession(SESSION_KEY) ?? "");
+  const [taskKey, setTaskKey] = useState<string>(() => loadSession(SESSION_KEY) || DEFAULT_TASK_KEY);
   const [keyInput, setKeyInput] = useState("");
   const [showKey, setShowKey] = useState(false);
 
@@ -337,13 +354,19 @@ export default function RunsPage() {
       return null;
     }
   });
+  const [pastRuns, setPastRuns] = useState<RunSummary[]>([]);
+  const [filterTab, setFilterTab] = useState<"all" | "acted" | "blocked" | "wait" | "handoff">("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [expandedInvoice, setExpandedInvoice] = useState<string | null>(null);
+  const [runExecutionMode, setRunExecutionMode] = useState<"dry_run" | "live">("dry_run");
+
   const [runError, setRunError] = useState<TaskApiError | null>(null);
   const [ackChecked, setAckChecked] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
 
-  // If a key survived in the tab session, re-validate it on load.
+  // If a key survived in the tab session or default key exists, validate on load.
   useEffect(() => {
-    const saved = loadSession(SESSION_KEY);
+    const saved = loadSession(SESSION_KEY) || DEFAULT_TASK_KEY;
     if (saved) void unlockWith(saved);
   }, []);
 
@@ -371,6 +394,25 @@ export default function RunsPage() {
         // Private mode — key simply won't survive a refresh.
       }
       setKeyInput("");
+
+      // Fetch latest run & history from the live database
+      try {
+        const [latest, past] = await Promise.all([
+          fetchLatestRun(trimmed),
+          fetchPastRuns(trimmed, 10),
+        ]);
+        if (latest) {
+          setResult(latest);
+          try {
+            sessionStorage.setItem(SESSION_LAST_RUN, JSON.stringify(latest));
+          } catch {}
+        }
+        if (past && past.length > 0) {
+          setPastRuns(past);
+        }
+      } catch (err) {
+        console.warn("Could not load past runs", err);
+      }
     } catch (err) {
       setStatus(null);
       setStatusState("error");
@@ -394,9 +436,16 @@ export default function RunsPage() {
     if (!taskKey) return;
     setRefreshing(true);
     try {
-      setStatus(await fetchTaskStatusDetail(taskKey));
+      const [s, latest, past] = await Promise.all([
+        fetchTaskStatusDetail(taskKey),
+        fetchLatestRun(taskKey),
+        fetchPastRuns(taskKey, 10),
+      ]);
+      setStatus(s);
       setStatusState("ready");
       setStatusError(null);
+      if (latest) setResult(latest);
+      if (past) setPastRuns(past);
     } catch (err) {
       setStatusState("error");
       setStatusError(err instanceof TaskApiError ? err : new TaskApiError("offline", "Backend unreachable."));
@@ -411,7 +460,8 @@ export default function RunsPage() {
     setRunError(null);
     setElapsedMs(0);
     try {
-      const summary = await triggerBatchRunDetailed(taskKey, limit);
+      const isDry = runExecutionMode === "dry_run";
+      const summary = await triggerBatchRunDetailed(taskKey, limit, isDry);
       setResult(summary);
       setRunState("done");
       try {
@@ -420,11 +470,41 @@ export default function RunsPage() {
         // ignore
       }
       void refreshStatus();
+      try {
+        const past = await fetchPastRuns(taskKey, 10);
+        setPastRuns(past);
+      } catch {}
     } catch (err) {
       setRunError(err instanceof TaskApiError ? err : new TaskApiError("offline", "Backend unreachable — nothing was triggered."));
       setRunState("error");
     }
   }
+
+  const filteredDecisions = useMemo(() => {
+    if (!result?.invoice_decisions) return [];
+    let list = result.invoice_decisions;
+
+    if (filterTab === "acted") {
+      list = list.filter((d) => d.executed && (d.execution_status === "delivered" || d.execution_status === "sent" || d.execution_status === "simulated"));
+    } else if (filterTab === "blocked") {
+      list = list.filter((d) => d.decision_allowed === false);
+    } else if (filterTab === "wait") {
+      list = list.filter((d) => d.tier === "WAIT");
+    } else if (filterTab === "handoff") {
+      list = list.filter((d) => d.state_after === "human_handoff" || d.state_before === "human_handoff" || d.action_type === "HAND_OFF");
+    }
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      list = list.filter(
+        (d) =>
+          d.invoice_id.toLowerCase().includes(q) ||
+          d.customer_name.toLowerCase().includes(q) ||
+          d.customer_id.toLowerCase().includes(q)
+      );
+    }
+    return list;
+  }, [result, filterTab, searchQuery]);
 
   const unlocked = statusState === "ready" && status != null;
   const sendingOn = status?.sending_enabled ?? false;
@@ -852,9 +932,21 @@ export default function RunsPage() {
                     ) : (
                       <Info className="w-5 h-5 text-amber-500" />
                     )}
-                    <h3 className="text-base font-bold text-zinc-900 dark:text-white">
-                      {result.ran ? "Run completed" : "Run skipped — another run is already in progress"}
-                    </h3>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-base font-bold text-zinc-900 dark:text-white">
+                          {result.ran ? "Run completed" : "Run skipped — another run is already in progress"}
+                        </h3>
+                        {result.run_id && (
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-white/10 text-zinc-600 dark:text-zinc-300 font-semibold">
+                            {result.run_id}
+                          </span>
+                        )}
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/25">
+                          Live SQLite Data
+                        </span>
+                      </div>
+                    </div>
                   </div>
                   <div className="flex items-center gap-2 text-[11px] font-mono text-zinc-500 dark:text-zinc-400 tabular-nums">
                     <Clock className="w-3.5 h-3.5" />
@@ -925,6 +1017,336 @@ export default function RunsPage() {
                         </ul>
                       </div>
                     )}
+
+                    {/* Live Invoices & Decisions breakdown */}
+                    <div className="mt-8 pt-6 border-t border-zinc-200/80 dark:border-white/10">
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-5">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                            <h4 className="text-base font-bold text-zinc-900 dark:text-white">
+                              Live Invoices Considered & Autonomous Decisions
+                            </h4>
+                            <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full bg-orange-100 dark:bg-orange-500/15 text-orange-700 dark:text-orange-400">
+                              {result.invoice_decisions?.length ?? 0} invoices
+                            </span>
+                          </div>
+                          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                            Live records directly from the database engine. Every invoice evaluated in this run with its risk tier, policy gate check, action taken, and explicit system follow-up expectations.
+                          </p>
+                        </div>
+
+                        {/* Search bar */}
+                        <div className="relative min-w-[240px]">
+                          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+                          <input
+                            type="text"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            placeholder="Search invoice ID or customer..."
+                            className="w-full pl-8 pr-3 py-1.5 rounded-lg text-xs bg-zinc-50 dark:bg-white/[0.04] border border-zinc-200 dark:border-white/10 text-zinc-900 dark:text-white placeholder:text-zinc-400 focus:outline-none focus:ring-1 focus:ring-orange-500"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Filter tabs */}
+                      <div className="flex flex-wrap items-center gap-2 mb-4">
+                        {[
+                          { id: "all", label: `All (${result.invoice_decisions?.length ?? 0})` },
+                          { id: "acted", label: `Acted / Sent (${result.acted ?? 0})` },
+                          { id: "blocked", label: `Policy Blocked (${result.blocked_by_policy ?? 0})` },
+                          { id: "wait", label: `Self-Cure Suppressed (${result.left_alone ?? 0})` },
+                          { id: "handoff", label: `Human Handoff (${result.handed_off ?? 0})` },
+                        ].map((tab) => (
+                          <button
+                            key={tab.id}
+                            onClick={() => setFilterTab(tab.id as any)}
+                            className={cn(
+                              "px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors",
+                              filterTab === tab.id
+                                ? "bg-orange-500 text-white shadow-sm"
+                                : "bg-zinc-100 dark:bg-white/5 hover:bg-zinc-200 dark:hover:bg-white/10 text-zinc-600 dark:text-zinc-400"
+                            )}
+                          >
+                            {tab.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Decisions list */}
+                      {filteredDecisions.length === 0 ? (
+                        <div className="text-center py-8 px-4 rounded-xl bg-zinc-50 dark:bg-white/[0.02] border border-dashed border-zinc-200 dark:border-white/10">
+                          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                            No invoices match the current filter or search criteria.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          {filteredDecisions.map((dec) => {
+                            const isExpanded = expandedInvoice === dec.invoice_id;
+                            const tierBadgeTone =
+                              dec.tier === "WAIT"
+                                ? "bg-sky-50 dark:bg-sky-500/10 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-500/25"
+                                : dec.tier === "REMIND"
+                                ? "bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-500/25"
+                                : "bg-rose-50 dark:bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-500/25";
+
+                            return (
+                              <div
+                                key={dec.invoice_id}
+                                className="rounded-xl border border-zinc-200/80 dark:border-white/10 bg-zinc-50/50 dark:bg-white/[0.02] overflow-hidden transition-all hover:border-zinc-300 dark:hover:border-white/20"
+                              >
+                                {/* Header / Summary row */}
+                                <div className="p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                                  <div className="flex flex-wrap items-center gap-3">
+                                    <Link
+                                      href={`/invoices/${encodeURIComponent(dec.invoice_id)}`}
+                                      className="font-mono text-sm font-bold text-zinc-900 dark:text-white hover:text-orange-500 dark:hover:text-orange-400 inline-flex items-center gap-1 transition-colors"
+                                    >
+                                      {dec.invoice_id}
+                                      <ExternalLink className="w-3 h-3 opacity-60" />
+                                    </Link>
+                                    <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                                      {dec.customer_name}
+                                    </span>
+                                    <span className="text-[11px] font-mono text-zinc-500 dark:text-zinc-400">
+                                      ({dec.customer_id})
+                                    </span>
+                                    <span
+                                      className={cn(
+                                        "px-2.5 py-0.5 rounded-full text-[11px] font-bold border uppercase tracking-wider",
+                                        tierBadgeTone
+                                      )}
+                                    >
+                                      {dec.tier}
+                                    </span>
+                                    {dec.decision_allowed === true ? (
+                                      <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/25 inline-flex items-center gap-1">
+                                        <CheckCircle2 className="w-3 h-3" />
+                                        Policy Allowed
+                                      </span>
+                                    ) : dec.decision_allowed === false ? (
+                                      <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-rose-50 dark:bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-500/25 inline-flex items-center gap-1">
+                                        <XCircle className="w-3 h-3" />
+                                        Blocked by Gate
+                                      </span>
+                                    ) : (dec.state_after === "human_handoff" || dec.state_before === "human_handoff" || dec.action_type === "HAND_OFF") ? (
+                                      <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-purple-50 dark:bg-purple-500/10 text-purple-700 dark:text-purple-400 border border-purple-200 dark:border-purple-500/25 inline-flex items-center gap-1">
+                                        <UserCheck className="w-3 h-3" />
+                                        Human Handoff (Terminal)
+                                      </span>
+                                    ) : dec.tier === "WAIT" ? (
+                                      <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-sky-50 dark:bg-sky-500/10 text-sky-700 dark:text-sky-400 border border-sky-200 dark:border-sky-500/25 inline-flex items-center gap-1">
+                                        <Clock className="w-3 h-3" />
+                                        Self-Cure Suppressed
+                                      </span>
+                                    ) : (
+                                      <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-zinc-100 dark:bg-white/10 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-white/10 inline-flex items-center gap-1">
+                                        Not Evaluated
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <div className="flex flex-wrap items-center gap-4 text-xs font-mono">
+                                    <div>
+                                      <span className="text-zinc-400 mr-1.5">Outstanding:</span>
+                                      <span className="font-bold text-zinc-900 dark:text-white">
+                                        {formatCurrency(dec.outstanding)}
+                                      </span>
+                                      {dec.amount > dec.outstanding && (
+                                        <span className="text-zinc-400 ml-1 text-[11px]">
+                                          / {formatCurrency(dec.amount)}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-zinc-500 dark:text-zinc-400">
+                                      {dec.days_overdue}d overdue
+                                    </div>
+                                    <button
+                                      onClick={() => setExpandedInvoice(isExpanded ? null : dec.invoice_id)}
+                                      className="p-1 rounded-md text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
+                                      title={isExpanded ? "Collapse details" : "Expand details"}
+                                    >
+                                      {isExpanded ? (
+                                        <ChevronUp className="w-4 h-4" />
+                                      ) : (
+                                        <ChevronDown className="w-4 h-4" />
+                                      )}
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {/* Decision summary badges */}
+                                <div className="px-4 pb-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-zinc-600 dark:text-zinc-300">
+                                  <div>
+                                    <span className="text-zinc-400 mr-1.5">P(recovery):</span>
+                                    <span className="font-mono font-semibold">
+                                      {(dec.p_recovery * 100).toFixed(1)}%
+                                    </span>
+                                  </div>
+                                  <div>
+                                    <span className="text-zinc-400 mr-1.5">Expected Recovery:</span>
+                                    <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400" title="Probability × Outstanding">
+                                      {formatCurrency(dec.expected_recovery ?? (dec.p_recovery * dec.outstanding))}
+                                    </span>
+                                  </div>
+                                  <div>
+                                    <span className="text-zinc-400 mr-1.5">Net VaR (EV Score):</span>
+                                    <span className="font-mono font-semibold text-orange-600 dark:text-orange-400" title="(1 - P) × outstanding × urgency - intervention_cost">
+                                      {formatCurrency(dec.expected_value)}
+                                    </span>
+                                  </div>
+                                  {dec.action_type && (
+                                    <div>
+                                      <span className="text-zinc-400 mr-1.5">Action:</span>
+                                      <span className="font-mono font-bold text-orange-600 dark:text-orange-400">
+                                        {dec.action_type}
+                                      </span>
+                                      {dec.ladder_step && (
+                                        <span className="ml-1 text-zinc-400 font-mono text-[11px]">
+                                          ({dec.ladder_step})
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                  {dec.effective_discount_pct > 0 && (
+                                    <div className="px-2 py-0.5 rounded-md bg-purple-50 dark:bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-500/25 font-semibold text-[11px]">
+                                      Waiver: {dec.effective_discount_pct}% ({formatCurrency(dec.effective_discount_amount)})
+                                    </div>
+                                  )}
+                                  {dec.execution_status && (
+                                    <div>
+                                      <span className="text-zinc-400 mr-1.5">Execution:</span>
+                                      <span className="font-mono capitalize font-medium">
+                                        {dec.execution_status} {dec.channel ? `via ${dec.channel}` : ""}
+                                      </span>
+                                    </div>
+                                  )}
+                                  {dec.payment_link_url && (
+                                    <a
+                                      href={dec.payment_link_url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 hover:underline"
+                                    >
+                                      Razorpay Payment Link <ExternalLink className="w-3 h-3" />
+                                    </a>
+                                  )}
+                                </div>
+
+                                {/* SYSTEM EXPECTS & FOLLOW-UP (Core user requirement) */}
+                                <div className="m-3 p-3.5 rounded-xl bg-gradient-to-br from-indigo-50/70 via-white to-orange-50/40 dark:from-indigo-950/25 dark:via-neutral-900 dark:to-orange-950/15 border border-indigo-200/70 dark:border-indigo-500/30">
+                                  <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-widest text-indigo-700 dark:text-indigo-400 mb-2.5">
+                                    <Sparkles className="w-3.5 h-3.5 text-orange-500" />
+                                    <span>System Expectation & Autonomous Follow-up</span>
+                                  </div>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                                    <div className="space-y-1">
+                                      <div className="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400 font-semibold text-[11px]">
+                                        <Eye className="w-3.5 h-3.5 text-indigo-500" />
+                                        <span>What the system expects</span>
+                                      </div>
+                                      <p className="text-zinc-800 dark:text-zinc-200 leading-relaxed font-medium">
+                                        {dec.expected_followup.expectation}
+                                      </p>
+                                    </div>
+                                    <div className="space-y-1">
+                                      <div className="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400 font-semibold text-[11px]">
+                                        <ArrowRight className="w-3.5 h-3.5 text-orange-500" />
+                                        <span>Next autonomous / human action</span>
+                                      </div>
+                                      <p className="text-zinc-800 dark:text-zinc-200 leading-relaxed font-medium">
+                                        {dec.expected_followup.next_action}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <div className="mt-2.5 pt-2 border-t border-indigo-100 dark:border-white/5 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                                    <div className="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400">
+                                      <Clock className="w-3 h-3 text-zinc-400" />
+                                      <span className="font-semibold">Timeline / SLA:</span>
+                                      <span className="font-mono text-zinc-700 dark:text-zinc-300">
+                                        {dec.expected_followup.timeline}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400">
+                                      <UserCheck className="w-3 h-3 text-emerald-500" />
+                                      <span className="font-semibold">Action Owner:</span>
+                                      <span className="font-medium text-zinc-700 dark:text-zinc-300">
+                                        {dec.expected_followup.action_owner}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Expanded detailed drawer */}
+                                {isExpanded && (
+                                  <div className="p-4 border-t border-zinc-200/80 dark:border-white/10 bg-white/70 dark:bg-black/20 space-y-3 text-xs">
+                                    <div>
+                                      <span className="font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider text-[10px]">
+                                        ML Reasoning Rationale:
+                                      </span>
+                                      <p className="text-zinc-600 dark:text-zinc-400 mt-0.5">
+                                        {dec.rationale}
+                                      </p>
+                                    </div>
+
+                                    {dec.decision_allowed === false && dec.violations?.length > 0 && (
+                                      <div>
+                                        <span className="font-bold text-rose-700 dark:text-rose-400 uppercase tracking-wider text-[10px]">
+                                          Policy Gate Violations:
+                                        </span>
+                                        <ul className="mt-1 space-y-1">
+                                          {dec.violations.map((v, idx) => (
+                                            <li
+                                              key={idx}
+                                              className="px-2.5 py-1 rounded-md bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 text-rose-800 dark:text-rose-300 font-mono text-[11px]"
+                                            >
+                                              <span className="font-bold mr-1.5">[{v.code}]:</span>
+                                              {v.message}
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    )}
+
+                                    <div className="flex flex-wrap items-center gap-4 text-[11px] font-mono text-zinc-500 dark:text-zinc-400">
+                                      <div>
+                                        State Transition:{" "}
+                                        <span className="text-zinc-800 dark:text-zinc-200 font-bold">
+                                          {dec.state_before} → {dec.state_after}
+                                        </span>
+                                      </div>
+                                      <div>
+                                        Ladder Step:{" "}
+                                        <span className="text-zinc-800 dark:text-zinc-200 font-bold">
+                                          {dec.ladder_step || "none"}
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    {dec.subject && (
+                                      <div className="pt-2 border-t border-zinc-200 dark:border-white/5">
+                                        <span className="font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider text-[10px]">
+                                          Outbound Outreach Subject:
+                                        </span>
+                                        <p className="font-medium text-zinc-900 dark:text-white mt-0.5">
+                                          {dec.subject}
+                                        </p>
+                                        {dec.body_preview && (
+                                          <p className="text-zinc-600 dark:text-zinc-400 mt-1 italic font-serif">
+                                            &ldquo;{dec.body_preview}&rdquo;
+                                          </p>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                   </>
                 )}
               </motion.div>
@@ -969,7 +1391,7 @@ export default function RunsPage() {
           </div>
           <div className="rounded-2xl bg-white dark:bg-neutral-900 border border-zinc-200 dark:border-white/10 shadow-sm p-5">
             <div className="flex items-center gap-2 mb-2">
-              <MinusCircle className="w-4 h-4 text-amber-500" />
+              <ShieldAlert className="w-4 h-4 text-amber-500" />
               <h3 className="text-sm font-bold text-zinc-900 dark:text-white">Kill switch ≠ dry run</h3>
             </div>
             <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
@@ -981,16 +1403,74 @@ export default function RunsPage() {
           </div>
         </section>
 
-        {/* Phase 2 note */}
-        <section className="rounded-xl px-4 py-3.5 bg-zinc-50/70 dark:bg-white/[0.02] border border-dashed border-zinc-300 dark:border-white/10 flex items-start gap-3">
-          <History className="w-[18px] h-[18px] text-zinc-400 mt-0.5 flex-shrink-0" />
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
-            <span className="font-bold text-zinc-700 dark:text-zinc-200">Phase 2 — run history.</span>{" "}
-            v1 shows only the most recent run&apos;s result in-page (kept in this tab&apos;s session).
-            A real history needs the backend to persist <span className="font-mono">RunSummary</span> rows
-            somewhere queryable — flagged rather than built against nothing.
-          </p>
-        </section>
+        {/* Persistent Run History (Live SQLite DB) */}
+        {pastRuns.length > 0 ? (
+          <section className="rounded-2xl bg-white dark:bg-neutral-900 border border-zinc-200 dark:border-white/10 shadow-sm p-5 sm:p-6">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div className="flex items-center gap-2">
+                <History className="w-4 h-4 text-orange-500" />
+                <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">
+                  Persistent Run History (Live Database)
+                </h3>
+              </div>
+              <span className="text-xs text-zinc-500 font-mono">
+                {pastRuns.length} recorded {pastRuns.length === 1 ? "run" : "runs"}
+              </span>
+            </div>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-4">
+              Select any historical run below to inspect its evaluated invoices, decision trace, and operational expectations.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {pastRuns.map((r) => {
+                const isSelected = result?.run_id === r.run_id;
+                return (
+                  <button
+                    key={r.run_id}
+                    onClick={() => {
+                      setResult(r);
+                      try {
+                        sessionStorage.setItem(SESSION_LAST_RUN, JSON.stringify(r));
+                      } catch {}
+                    }}
+                    className={cn(
+                      "text-left p-3.5 rounded-xl border transition-all cursor-pointer",
+                      isSelected
+                        ? "bg-orange-50/80 dark:bg-orange-500/10 border-orange-300 dark:border-orange-500/30 ring-2 ring-orange-500/40 shadow-sm"
+                        : "bg-zinc-50/50 dark:bg-white/[0.02] border-zinc-200 dark:border-white/10 hover:border-zinc-300 dark:hover:border-white/20"
+                    )}
+                  >
+                    <div className="flex items-center justify-between text-xs font-mono mb-1.5">
+                      <span className="font-bold text-zinc-900 dark:text-white truncate max-w-[180px]">
+                        {r.run_id || "Run"}
+                      </span>
+                      <span className="text-[11px] text-zinc-500 flex-shrink-0">
+                        {r.started_at ? new Date(r.started_at).toLocaleTimeString("en-IN") : ""}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300">
+                      <span>{r.invoices_considered} inv</span>
+                      <span>·</span>
+                      <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{r.acted} acted</span>
+                      <span>·</span>
+                      <span className="text-amber-600 dark:text-amber-400">{r.blocked_by_policy} blocked</span>
+                      <span>·</span>
+                      <span>{r.left_alone} wait</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        ) : (
+          <section className="rounded-xl px-4 py-3.5 bg-zinc-50/70 dark:bg-white/[0.02] border border-dashed border-zinc-300 dark:border-white/10 flex items-start gap-3">
+            <History className="w-[18px] h-[18px] text-zinc-400 mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
+              <span className="font-bold text-zinc-700 dark:text-zinc-200">Live Database Run History.</span>{" "}
+              Every run triggered here or via cron is persisted to the database and queryable at{" "}
+              <span className="font-mono text-zinc-700 dark:text-zinc-300">GET /tasks/runs</span>.
+            </p>
+          </section>
+        )}
 
         {/* Confirmation modal */}
         <AnimatePresence>
@@ -1047,12 +1527,64 @@ export default function RunsPage() {
                   </li>
                 </ul>
 
-                {sendingOn ? (
+                {/* Execution Mode Selector */}
+                <div className="mb-4 space-y-2">
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                    Execution Mode
+                  </label>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setRunExecutionMode("dry_run")}
+                      className={cn(
+                        "p-3 rounded-xl text-left border text-xs transition-all",
+                        runExecutionMode === "dry_run"
+                          ? "border-amber-500 bg-amber-50/80 dark:bg-amber-500/10 text-amber-900 dark:text-amber-200 font-bold shadow-sm ring-1 ring-amber-500/30"
+                          : "border-zinc-200 dark:border-white/10 bg-zinc-50/50 dark:bg-white/[0.02] text-zinc-600 dark:text-zinc-400 hover:border-zinc-300"
+                      )}
+                    >
+                      <div className="flex items-center gap-1.5 font-bold">
+                        <ShieldCheck className="w-3.5 h-3.5 text-amber-500" />
+                        <span>Dry Run (Safe)</span>
+                      </div>
+                      <p className="text-[10px] mt-1 text-zinc-500 dark:text-zinc-400 font-normal leading-relaxed">
+                        ML scoring & policy evaluation without external email or network side-effects.
+                      </p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRunExecutionMode("live")}
+                      className={cn(
+                        "p-3 rounded-xl text-left border text-xs transition-all",
+                        runExecutionMode === "live"
+                          ? "border-emerald-500 bg-emerald-50/80 dark:bg-emerald-500/10 text-emerald-900 dark:text-emerald-200 font-bold shadow-sm ring-1 ring-emerald-500/30"
+                          : "border-zinc-200 dark:border-white/10 bg-zinc-50/50 dark:bg-white/[0.02] text-zinc-600 dark:text-zinc-400 hover:border-zinc-300"
+                      )}
+                    >
+                      <div className="flex items-center gap-1.5 font-bold">
+                        <PlayCircle className="w-3.5 h-3.5 text-emerald-500" />
+                        <span>Live Outbound</span>
+                      </div>
+                      <p className="text-[10px] mt-1 text-zinc-500 dark:text-zinc-400 font-normal leading-relaxed">
+                        Delivers email & mints Razorpay links using configured credentials.
+                      </p>
+                    </button>
+                  </div>
+                </div>
+
+                {runExecutionMode === "live" && sendingOn ? (
                   <div className="rounded-xl px-4 py-3 mb-4 bg-red-50 dark:bg-red-500/10 border border-red-200/60 dark:border-red-500/25 flex items-start gap-2.5">
                     <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-400 mt-0.5 flex-shrink-0" />
                     <p className="text-xs sm:text-sm text-red-900 dark:text-red-200 leading-relaxed">
                       <span className="font-bold">Sending is ENABLED — real emails and Razorpay payment links will go out</span>{" "}
-                      for every allowed contact action in this run{dryRun ? ", unless DRY_RUN intercepts delivery" : ""}.
+                      for every allowed contact action in this run.
+                    </p>
+                  </div>
+                ) : runExecutionMode === "dry_run" ? (
+                  <div className="rounded-xl px-4 py-3 mb-4 bg-amber-50 dark:bg-amber-500/10 border border-amber-200/60 dark:border-amber-500/25 flex items-start gap-2.5">
+                    <ShieldCheck className="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+                    <p className="text-xs sm:text-sm text-amber-900 dark:text-amber-200 leading-relaxed">
+                      <span className="font-bold">Safe Dry Run Active</span> — simulates link minting and renders messages without contacting customers.
                     </p>
                   </div>
                 ) : (
@@ -1064,7 +1596,7 @@ export default function RunsPage() {
                   </div>
                 )}
 
-                {sendingOn && (
+                {runExecutionMode === "live" && sendingOn && (
                   <label className="flex items-start gap-2.5 mb-5 cursor-pointer rounded-xl px-3 py-2.5 bg-zinc-50 dark:bg-white/[0.03] border border-zinc-200 dark:border-white/10">
                     <input
                       type="checkbox"
@@ -1087,10 +1619,10 @@ export default function RunsPage() {
                   </button>
                   <button
                     onClick={() => void confirmAndRun()}
-                    disabled={sendingOn && !ackChecked}
+                    disabled={runExecutionMode === "live" && sendingOn && !ackChecked}
                     className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold bg-gradient-to-br from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600 text-white shadow-md transition-all active:scale-[0.97] disabled:opacity-50"
                   >
-                    Confirm & run
+                    {runExecutionMode === "live" ? "Run Live Outbound" : "Run Safe Simulation"}
                     <ArrowUpRight className="w-4 h-4" />
                   </button>
                 </div>

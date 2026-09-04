@@ -260,12 +260,81 @@ export interface TaskStatusResponse {
   expected_interval_seconds?: number;
 }
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api/v1';
+// Never fall back to a real credential: an unset key sends no header, so the
+// API answers 401/503 visibly instead of authenticating every install.
+const ENV_TASK_KEY = process.env.NEXT_PUBLIC_TASK_API_KEY || '';
+export const OPERATOR_KEY_SESSION_KEY = 'recoup_operator_key';
+
+/** Operator bearer key: tab session override first, build-time env second. */
+export function getOperatorKey(): string {
+  try {
+    const saved = sessionStorage.getItem(OPERATOR_KEY_SESSION_KEY);
+    if (saved) return saved;
+  } catch { /* sessionStorage unavailable (SSR) */ }
+  return ENV_TASK_KEY;
+}
+
+export function setOperatorKey(key: string): void {
+  try {
+    if (key) sessionStorage.setItem(OPERATOR_KEY_SESSION_KEY, key);
+    else sessionStorage.removeItem(OPERATOR_KEY_SESSION_KEY);
+  } catch { /* ignore */ }
+}
+
+/** Bearer header for operator routes; {} when no key is configured. */
+export function operatorHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const key = getOperatorKey();
+  return key ? { ...extra, Authorization: `Bearer ${key}` } : { ...extra };
+}
+
 // ---------------------------------------------------------------------------
 // Authenticated task calls for /runs (Autonomous Run Control)
 // ---------------------------------------------------------------------------
 
+export interface ExpectedFollowup {
+  expectation: string;
+  next_action: string;
+  timeline: string;
+  action_owner: string;
+}
+
+export interface RunInvoiceDecision {
+  invoice_id: string;
+  customer_id: string;
+  customer_name: string;
+  amount: number;
+  amount_paid: number;
+  outstanding: number;
+  currency: string;
+  days_overdue: number;
+  tier: 'WAIT' | 'REMIND' | 'ESCALATE';
+  p_recovery: number;
+  expected_value: number;
+  expected_recovery?: number;
+  rationale: string;
+  action_type: string | null;
+  ladder_step: string;
+  decision_allowed: boolean | null;
+  decision_reason: string;
+  violations: Array<{ code: string; message: string }>;
+  effective_discount_pct: number;
+  effective_discount_amount: number;
+  state_before: string;
+  state_after: string;
+  transitioned: boolean;
+  executed: boolean;
+  execution_status: string | null;
+  channel: string | null;
+  subject: string | null;
+  body_preview: string | null;
+  payment_link_url: string | null;
+  expected_followup: ExpectedFollowup;
+}
+
 /** Mirrors app/services/batch_runner.py::RunSummary field-for-field. */
 export interface RunSummary {
+  run_id?: string;
   started_at: string;
   finished_at: string;
   ran: boolean;
@@ -282,6 +351,7 @@ export interface RunSummary {
   handed_off: number;
   sending_halted: boolean;
   errors: string[];
+  invoice_decisions?: RunInvoiceDecision[];
 }
 
 export type TaskApiErrorCode = 'wrong-key' | 'disabled' | 'offline' | 'http';
@@ -298,8 +368,9 @@ export class TaskApiError extends Error {
 }
 
 function taskHeaders(taskKey: string): Record<string, string> {
+  const effectiveKey = taskKey || getOperatorKey();
   // require_task_key reads the Authorization header as `Bearer <token>`.
-  return taskKey ? { Authorization: `Bearer ${taskKey}` } : {};
+  return effectiveKey ? { Authorization: `Bearer ${effectiveKey}` } : {};
 }
 
 /**
@@ -339,10 +410,18 @@ export async function fetchTaskStatusDetail(taskKey: string): Promise<TaskStatus
  * send real email, so a fake "success" when the backend is down would be a lie
  * the UI must never tell.
  */
-export async function triggerBatchRunDetailed(taskKey: string, limit: number): Promise<RunSummary> {
+export async function triggerBatchRunDetailed(
+  taskKey: string,
+  limit: number,
+  dryRun?: boolean
+): Promise<RunSummary> {
+  let url = `${API_BASE}/tasks/run-batch?limit=${encodeURIComponent(String(limit))}`;
+  if (typeof dryRun === "boolean") {
+    url += `&dry_run=${dryRun}`;
+  }
   let res: Response;
   try {
-    res = await fetch(`${API_BASE}/tasks/run-batch?limit=${encodeURIComponent(String(limit))}`, {
+    res = await fetch(url, {
       method: 'POST',
       headers: taskHeaders(taskKey),
     });
@@ -361,6 +440,42 @@ export async function triggerBatchRunDetailed(taskKey: string, limit: number): P
     );
   }
   throw new TaskApiError('http', `Trigger failed (HTTP ${res.status}) — nothing ran.`, res.status);
+}
+
+/**
+ * GET /tasks/runs/latest - fetch the most recently executed autonomous batch run.
+ */
+export async function fetchLatestRun(taskKey: string): Promise<RunSummary | null> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/tasks/runs/latest`, {
+      method: 'GET',
+      headers: taskHeaders(taskKey),
+      cache: 'no-store',
+    });
+  } catch {
+    return null;
+  }
+  if (!res.ok) return null;
+  return (await res.json()) as RunSummary | null;
+}
+
+/**
+ * GET /tasks/runs - fetch historical batch runs.
+ */
+export async function fetchPastRuns(taskKey: string, limit = 10): Promise<RunSummary[]> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/tasks/runs?limit=${encodeURIComponent(String(limit))}`, {
+      method: 'GET',
+      headers: taskHeaders(taskKey),
+      cache: 'no-store',
+    });
+  } catch {
+    return [];
+  }
+  if (!res.ok) return [];
+  return (await res.json()) as RunSummary[];
 }
 
 export interface BatchReportData {
@@ -432,6 +547,7 @@ export async function fetchInvoiceDetail(invoiceId: string): Promise<InvoiceOut>
   try {
     const res = await fetch(`${API_BASE}/invoices/${encodeURIComponent(invoiceId)}`, {
       method: 'GET',
+      headers: operatorHeaders(),
       cache: 'no-store',
     });
     if (res.ok) {
@@ -593,9 +709,6 @@ export interface InvoiceListFilters {
   page_size?: number;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
-const TASK_KEY = process.env.NEXT_PUBLIC_TASK_API_KEY || '';
-
 export async function checkBackendHealth(): Promise<{ ok: boolean; latencyMs: number; service?: string }> {
   const start = performance.now();
   try {
@@ -615,7 +728,7 @@ export async function runInvoiceCycle(invoiceId: string): Promise<RunCycleRespon
   try {
     const res = await fetch(`${API_BASE}/invoices/${encodeURIComponent(invoiceId)}/run-cycle`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: operatorHeaders({ 'Content-Type': 'application/json' }),
       cache: 'no-store',
     });
     if (res.ok) {
@@ -631,6 +744,7 @@ export async function fetchAuditTrail(invoiceId: string): Promise<AuditTrailOut>
   try {
     const res = await fetch(`${API_BASE}/invoices/${encodeURIComponent(invoiceId)}/audit`, {
       method: 'GET',
+      headers: operatorHeaders(),
       cache: 'no-store',
     });
     if (res.ok) {
@@ -724,7 +838,7 @@ function getFallbackRecoveryCard(): RecoveryCardOut {
 export async function classifyReplyPreview(text: string): Promise<ClassifyPreviewOut> {
   const res = await fetch(`${API_BASE}/replies/classify-preview`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: operatorHeaders({ 'Content-Type': 'application/json' }),
     cache: 'no-store',
     body: JSON.stringify({ text }),
   });
@@ -759,7 +873,7 @@ function num(value: unknown, fallback: number): number {
 
 export async function fetchPolicyDefaults(): Promise<{ defaults: PolicyDefaults; live: boolean }> {
   try {
-    const res = await fetch(`${API_BASE}/policy`, { method: 'GET', cache: 'no-store' });
+    const res = await fetch(`${API_BASE}/policy`, { method: 'GET', headers: operatorHeaders(), cache: 'no-store' });
     if (res.ok) {
       const data = await res.json();
       // GET /policy serves the compiled engine description; pick out any
@@ -789,7 +903,7 @@ export async function simulatePolicy(request: PolicySimulateRequest): Promise<Po
   try {
     res = await fetch(`${API_BASE}/policy/simulate`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: operatorHeaders({ 'Content-Type': 'application/json' }),
       cache: 'no-store',
       body: JSON.stringify(request),
     });
@@ -810,6 +924,7 @@ export async function fetchReplyReviewQueue(): Promise<ReplyReviewQueue> {
   try {
     const res = await fetch(`${API_BASE}/replies/review`, {
       method: 'GET',
+      headers: operatorHeaders(),
       cache: 'no-store',
     });
     if (res.ok) {
@@ -851,7 +966,7 @@ export async function markReplyReviewed(replyId: string): Promise<{ ok: boolean 
   try {
     const res = await fetch(`${API_BASE}/replies/${encodeURIComponent(replyId)}/reviewed`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: operatorHeaders({ 'Content-Type': 'application/json' }),
     });
     return { ok: res.ok };
   } catch {
@@ -863,6 +978,7 @@ export async function fetchPolicy(): Promise<PolicyResponse> {
   try {
     const res = await fetch(`${API_BASE}/policy`, {
       method: 'GET',
+      headers: operatorHeaders(),
       cache: 'no-store',
     });
     if (res.ok) {
@@ -1000,7 +1116,7 @@ export async function fetchTaskStatus(): Promise<TaskStatusResponse | null> {
   try {
     const res = await fetch(`${API_BASE}/tasks/status`, {
       method: 'GET',
-      headers: TASK_KEY ? { 'Authorization': `Bearer ${TASK_KEY}` } : {},
+      headers: operatorHeaders(),
       cache: 'no-store',
     });
     if (res.ok) {
@@ -1014,7 +1130,7 @@ export async function triggerBatchRun(limit: number = 20): Promise<{ ran: boolea
   try {
     const res = await fetch(`${API_BASE}/tasks/run-batch?limit=${limit}`, {
       method: 'POST',
-      headers: TASK_KEY ? { 'Authorization': `Bearer ${TASK_KEY}` } : {},
+      headers: operatorHeaders(),
     });
     if (res.ok) {
       const data = await res.json();
@@ -1028,6 +1144,7 @@ export async function fetchBatchReport(): Promise<BatchReportResponse> {
   try {
     const res = await fetch(`${API_BASE}/reports/batch`, {
       method: 'GET',
+      headers: operatorHeaders(),
       cache: 'no-store',
     });
     if (res.ok) {
@@ -1057,6 +1174,7 @@ export async function fetchInvoiceList(
   try {
     const res = await fetch(`${API_BASE}/invoices?${params.toString()}`, {
       method: 'GET',
+      headers: operatorHeaders(),
       cache: 'no-store',
     });
     if (res.ok) {

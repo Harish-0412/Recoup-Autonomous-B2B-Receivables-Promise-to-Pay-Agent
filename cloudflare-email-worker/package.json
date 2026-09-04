@@ -1,0 +1,21 @@
+{
+  "name": "recoup-email-worker",
+  "version": "1.0.0",
+  "description": "Cloudflare Email Routing Worker forwarding inbound customer replies to Recoup Promise-to-Pay API",
+  "main": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "tail": "wrangler tail"
+  },
+  "dependencies": {
+    "postal-mime": "^2.3.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240923.0",
+    "typescript": "^5.5.4",
+    "wrangler": "^3.78.0"
+  }
+}

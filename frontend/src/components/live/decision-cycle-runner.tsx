@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useState, useEffect } from "react";
 import { runInvoiceCycle, RunCycleResponse, triggerBatchRun } from "@/lib/api";
@@ -25,33 +25,33 @@ interface InvoiceScenario {
 
 const SCENARIOS: InvoiceScenario[] = [
   {
-    id: "INV-1044",
-    customer: "Acme Cloud Technologies",
-    amount: "₹75,000",
-    overdueDays: 2,
-    expectedRisk: "Self-Cure Candidate",
-    description: "Reliable customer with 97% on-time record. 2 days overdue.",
-  },
-  {
-    id: "INV-1042",
-    customer: "Nexlink Logistics Pvt Ltd",
-    amount: "₹50,000",
-    overdueDays: 9,
+    id: "INV-2026-00070",
+    customer: "Shree Exports LLP",
+    amount: "₹1,95,960",
+    overdueDays: 5,
     expectedRisk: "Tier 1 Reminder",
-    description: "Frequency cap cleared (3 days). Ready for initial payment nudge.",
+    description: "5 days overdue. Policy gate clears Tier 1 reminder via Razorpay + Resend.",
   },
   {
-    id: "INV-1043",
-    customer: "Apex Retail Solutions",
-    amount: "₹2,00,000",
-    overdueDays: 24,
-    expectedRisk: "High Value At Risk",
-    description: "Prior promise broken on 28th. Final notice with authorized waiver.",
+    id: "INV-2026-00111",
+    customer: "Vertex Solutions & Co",
+    amount: "₹2,28,238",
+    overdueDays: 14,
+    expectedRisk: "Policy Gate Blocked",
+    description: "14 days overdue. Policy gate blocks further contact: volume cap reached.",
+  },
+  {
+    id: "INV-2026-00017",
+    customer: "Deccan Enterprises & Co",
+    amount: "₹35,004",
+    overdueDays: 15,
+    expectedRisk: "Self-Cure Candidate",
+    description: "Expected value does not clear action threshold; contact suppressed to protect goodwill.",
   },
 ];
 
 export function DecisionCycleRunner() {
-  const [selectedId, setSelectedId] = useState<string>("INV-1042");
+  const [selectedId, setSelectedId] = useState<string>("INV-2026-00070");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<RunCycleResponse | null>(null);
   const [auditModalOpen, setAuditModalOpen] = useState(false);

@@ -22,6 +22,7 @@ from app.core.audit import DecisionLedger
 from app.core.domain import CaseSnapshot, snapshot_from_rows
 from app.core.promise_tracker import PromiseRecord
 from app.models import (
+    BatchRunRecord,
     ContactChannel,
     ContactLog,
     Customer,
@@ -83,7 +84,10 @@ async def list_open_invoices(session: AsyncSession, *, limit: int = 500) -> list
         .where(
             Invoice.status.in_(
                 [InvoiceStatus.OPEN, InvoiceStatus.IN_PROGRESS, InvoiceStatus.PROMISED]
-            )
+            ),
+            Invoice.escalation_state.notin_(
+                [EscalationState.HUMAN_HANDOFF, EscalationState.CLOSED]
+            ),
         )
         .order_by(Invoice.due_date)
         .limit(limit)
@@ -157,8 +161,7 @@ async def list_invoices_paginated(
         "issue_date": Invoice.issue_date,
     }.get(sort_by)
     if safe_column is not None:
-        stmt = stmt.order_by(
-            safe_column.desc() if sort_desc else safe_column.asc())
+        stmt = stmt.order_by(safe_column.desc() if sort_desc else safe_column.asc())
     else:
         stmt = stmt.order_by((Invoice.amount - Invoice.amount_paid).desc())
 
@@ -500,3 +503,32 @@ async def pending_promises(
         .limit(limit)
     )
     return list(result.all())  # type: ignore[arg-type]
+
+
+async def save_batch_run(session: AsyncSession, record: BatchRunRecord) -> BatchRunRecord:
+    """Save an autonomous batch run record and its invoice decisions."""
+    session.add(record)
+    await session.flush()
+    return record
+
+
+async def get_latest_batch_run(session: AsyncSession) -> BatchRunRecord | None:
+    """Get the most recent completed batch run."""
+    result = await session.execute(
+        select(BatchRunRecord).order_by(BatchRunRecord.created_at.desc()).limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def list_batch_runs(session: AsyncSession, *, limit: int = 20) -> list[BatchRunRecord]:
+    """Get list of past batch runs, most recent first."""
+    result = await session.execute(
+        select(BatchRunRecord).order_by(BatchRunRecord.created_at.desc()).limit(limit)
+    )
+    return list(result.scalars().all())
+
+
+async def get_batch_run_by_id(session: AsyncSession, run_id: str) -> BatchRunRecord | None:
+    """Get a specific batch run by its run_id."""
+    result = await session.execute(select(BatchRunRecord).where(BatchRunRecord.run_id == run_id))
+    return result.scalar_one_or_none()

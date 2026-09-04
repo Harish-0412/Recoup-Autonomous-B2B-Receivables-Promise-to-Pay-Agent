@@ -347,3 +347,38 @@ class InboundReply(Base):
     @property
     def needs_review(self) -> bool:
         return self.disposition is ReplyDisposition.NEEDS_REVIEW
+
+
+class BatchRunRecord(Base):
+    """Persisted record of an autonomous batch run and its per-invoice decisions.
+
+    Stores both the aggregate RunSummary metrics and the detailed item-level
+    decisions (which invoice was used, what decision was made, what the system
+    expects next). This powers the live Runs page and audit dashboard.
+    """
+
+    __tablename__ = "batch_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    started_at: Mapped[str] = mapped_column(String(64))
+    finished_at: Mapped[str] = mapped_column(String(64), default="")
+    ran: Mapped[bool] = mapped_column(Boolean, default=True)
+    skipped_reason: Mapped[str] = mapped_column(Text, default="")
+
+    promises_checked: Mapped[int] = mapped_column(Integer, default=0)
+    promises_broken: Mapped[int] = mapped_column(Integer, default=0)
+    promises_kept: Mapped[int] = mapped_column(Integer, default=0)
+
+    invoices_considered: Mapped[int] = mapped_column(Integer, default=0)
+    scored: Mapped[int] = mapped_column(Integer, default=0)
+    acted: Mapped[int] = mapped_column(Integer, default=0)
+    blocked_by_policy: Mapped[int] = mapped_column(Integer, default=0)
+    left_alone: Mapped[int] = mapped_column(Integer, default=0)
+    delivery_failed: Mapped[int] = mapped_column(Integer, default=0)
+    handed_off: Mapped[int] = mapped_column(Integer, default=0)
+    sending_halted: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    errors: Mapped[list[str]] = mapped_column(JSON, default=list)
+    invoice_decisions: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
