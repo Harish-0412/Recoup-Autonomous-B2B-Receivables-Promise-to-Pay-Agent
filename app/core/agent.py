@@ -197,6 +197,18 @@ def run_cycle(
     fsm = EscalationCase(case, policy_engine, ledger=ledger)
     state_before = fsm.escalation_state
 
+    # The feature vector is frozen into the trace so the Wave 6 outcomes ETL
+    # can rebuild point-in-time training rows without reconstructing history:
+    # features are valid as of this scoring instant by construction.
+    try:
+        from src.ml.features.recovery_features import FEATURE_SET_VERSION, build_recovery_features
+
+        scored_features: dict[str, float] | None = build_recovery_features(case)
+        scored_feature_set: str | None = FEATURE_SET_VERSION
+    except Exception:
+        scored_features = None
+        scored_feature_set = None
+
     append_decision_trace(
         invoice_id=case.invoice_id,
         event="scored",
@@ -206,9 +218,13 @@ def run_cycle(
         p_recovery=score.p_recovery,
         expected_value=score.expected_value,
         outstanding=score.outstanding,
+        invoice_amount=case.invoice.amount,
+        currency=case.invoice.currency,
         tier=score.tier.value,
         scorer_version=score.prediction.model_version,
         top_drivers=[driver.feature for driver in score.prediction.top_drivers[:3]],
+        feature_set=scored_feature_set,
+        features=scored_features,
     )
 
     if score.tier is InterventionTier.WAIT:

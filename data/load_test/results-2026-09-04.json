@@ -1,0 +1,68 @@
+{
+  "base_url": "http://127.0.0.1:8123 (dev staging sandbox)",
+  "dry_run": true,
+  "sending_enabled": true,
+  "sizes": [
+    {
+      "n": 50,
+      "repeats": 2,
+      "wall_mean_s": 0.537,
+      "wall_p95_s": 0.552,
+      "per_invoice_p95_ms": 11.03,
+      "considered": 50
+    },
+    {
+      "n": 100,
+      "repeats": 2,
+      "wall_mean_s": 1.054,
+      "wall_p95_s": 1.059,
+      "per_invoice_p95_ms": 10.59,
+      "considered": 100
+    },
+    {
+      "n": 200,
+      "repeats": 2,
+      "wall_mean_s": 2.124,
+      "wall_p95_s": 2.152,
+      "per_invoice_p95_ms": 10.76,
+      "considered": 200
+    },
+    {
+      "n": 400,
+      "repeats": 2,
+      "wall_mean_s": 4.255,
+      "wall_p95_s": 4.545,
+      "per_invoice_p95_ms": 11.36,
+      "considered": 400
+    },
+    {
+      "n": 800,
+      "repeats": 2,
+      "wall_mean_s": 8.585,
+      "wall_p95_s": 9.389,
+      "per_invoice_p95_ms": 11.74,
+      "considered": 800
+    },
+    {
+      "n": 1600,
+      "repeats": 2,
+      "wall_mean_s": 18.712,
+      "wall_p95_s": 20.61,
+      "per_invoice_p95_ms": 12.88,
+      "considered": 1600
+    },
+    {
+      "n": 2400,
+      "repeats": 2,
+      "wall_mean_s": 26.014,
+      "wall_p95_s": 28.93,
+      "per_invoice_p95_ms": 12.05,
+      "considered": 2400
+    }
+  ],
+  "concurrency": {
+    "fired": 5,
+    "winners": 1,
+    "single_winner": true
+  }
+}

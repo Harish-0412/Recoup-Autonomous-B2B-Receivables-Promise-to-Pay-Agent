@@ -20,15 +20,20 @@ from app.api.cash_forecast import router as cash_forecast_router
 from app.api.contact_timing import router as contact_timing_router
 from app.api.drift import router as drift_router
 from app.api.health import router as health_router
+from app.api.integrations import router as integrations_router
 from app.api.invoices import router as invoices_router
 from app.api.models import router as models_router
+from app.api.payments import router as payments_router
 from app.api.policy import router as policy_router
 from app.api.replies import router as replies_router
 from app.api.reports import router as reports_router
+from app.api.secrets import router as secrets_router
 from app.api.tasks import router as tasks_router
 from app.api.webhooks import router as webhooks_router
 from app.core.config import get_settings
 from app.core.logging import get_logger, setup_logging
+from app.core.observability import request_id_middleware_factory, setup_otel
+from app.core.secrets import inject_secrets_into_env
 from app.db.session import close_db, engine
 from src.ml.reply.cascade import install_cascade_classifier
 
@@ -49,7 +54,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     visible as a failed release -- rather than as a 500 on the first request.
     """
 
+    # Load secrets from provider before everything else
+    await inject_secrets_into_env()
+
     setup_logging()
+
+    # Get settings after secret injection
+    settings = get_settings()
     logger.info("Starting application", env=settings.APP_ENV, debug=settings.DEBUG)
 
     async with engine.connect() as connection:
@@ -80,6 +91,12 @@ app = FastAPI(
     redoc_url="/redoc" if settings.DEBUG else None,
 )
 
+# Set up OpenTelemetry tracing
+setup_otel(app)
+
+# Add request ID middleware for correlation
+app.add_middleware(request_id_middleware_factory(app))
+
 # CORS_ORIGINS is the only way to widen this. The previous form used "*" under
 # DEBUG, which browsers reject outright when paired with allow_credentials --
 # so the permissive branch did not even work, it just failed confusingly.
@@ -94,6 +111,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(broken_promise_router)
 app.include_router(broken_promise_router, prefix="/api")
 app.include_router(broken_promise_router, prefix="/api/v1")
 app.include_router(cash_forecast_router, prefix="/api")
@@ -101,12 +119,15 @@ app.include_router(cash_forecast_router, prefix="/api/v1")
 app.include_router(contact_timing_router, prefix="/api/v1")
 app.include_router(drift_router, prefix="/api/v1")
 app.include_router(health_router, prefix="/api/v1")
+app.include_router(integrations_router, prefix="/api/v1")
 app.include_router(invoices_router, prefix="/api/v1")
 app.include_router(models_router, prefix="/api/v1")
+app.include_router(payments_router, prefix="/api/v1")
 app.include_router(webhooks_router, prefix="/api/v1")
 app.include_router(reports_router, prefix="/api/v1")
 app.include_router(policy_router, prefix="/api/v1")
 app.include_router(replies_router, prefix="/api/v1")
+app.include_router(secrets_router, prefix="/api/v1")
 app.include_router(tasks_router, prefix="/api/v1")
 
 

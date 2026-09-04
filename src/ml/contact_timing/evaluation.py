@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from src.ml.contact_timing.bandit import TimingBandit
 from src.ml.contact_timing.dataset import true_response_rate
@@ -122,9 +122,7 @@ def replay_evaluate(
         eval_rows=len(eval_frame),
         eval_customers=int(eval_frame["customer_id"].nunique()),
         matched_rows=len(matched_rewards),
-        policy_reward=(
-            float(np.mean(matched_rewards)) if matched_rewards else 0.0
-        ),
+        policy_reward=(float(np.mean(matched_rewards)) if matched_rewards else 0.0),
         logging_reward=float(np.mean(logging_rewards)) if logging_rewards else 0.0,
         best_fixed_arm=best_arm,
         best_fixed_arm_reward=float(arm_means[best_arm]),

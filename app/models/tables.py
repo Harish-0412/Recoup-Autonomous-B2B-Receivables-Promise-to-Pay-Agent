@@ -10,6 +10,11 @@ Two conventions worth knowing before reading:
   and nothing in this codebase issues an UPDATE against it. Each row carries
   the hash of the row before it, so a silent edit breaks the chain and
   ``app.core.audit.DecisionLedger.verify`` reports where.
+* **Wave 1 tenancy: every tenant table carries ``business_id``.** One Postgres,
+  many businesses; every read/write is filtered by ``business_id``. Business
+  keys are unique *within* a business -- two tenants can both have INV-1042 --
+  so uniqueness is always composite ``(business_id, <key>)``. See
+  docs/tenancy.md.
 """
 
 from __future__ import annotations
@@ -35,15 +40,29 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
 from app.models.enums import (
+    AllocationSource,
     ContactChannel,
     DecisionOutcome,
     DeliveryStatus,
     EscalationState,
+    IntegrationProvider,
     InvoiceStatus,
     PromiseStatus,
     ReplyDisposition,
 )
 from src.ml.versioning import utc_now
+
+#: Owner key used when a row predates tenancy or a caller has not resolved one.
+#: Matches the ``server_default='default'`` in the Wave 1 migration and
+#: ``Settings.BUSINESS_ID``. New code must always pass an explicit business_id;
+#: this exists only so legacy rows and NOT NULL stay compatible.
+DEFAULT_BUSINESS_ID: str = "default"
+
+
+def _business_id_column() -> Mapped[str]:
+    return mapped_column(
+        Text, nullable=False, default=DEFAULT_BUSINESS_ID, server_default=DEFAULT_BUSINESS_ID
+    )
 
 
 def _enum(python_enum: type, name: str) -> SAEnum:
@@ -61,13 +80,46 @@ def _enum(python_enum: type, name: str) -> SAEnum:
     )
 
 
+class Business(Base):
+    """One tenant in a shared database. Not in the agent loop.
+
+    v1 resolution is API_KEY -> business_id via ``api_key`` / ``task_api_key``
+    columns (later JWT ``org_id``). ``business_id`` is the stable owner key
+    recorded on every tenant row; it is what the Wave 1 migration backfills
+    from ``Settings.BUSINESS_ID``.
+    """
+
+    __tablename__ = "businesses"
+    __table_args__ = (
+        UniqueConstraint("business_id", name="uq_businesses_business_id"),
+        UniqueConstraint("api_key", name="uq_businesses_api_key"),
+        UniqueConstraint("task_api_key", name="uq_businesses_task_api_key"),
+        Index("ix_businesses_business_id", "business_id", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    business_id: Mapped[str] = mapped_column(Text)
+    name: Mapped[str] = mapped_column(String(255), default="")
+    #: Operator credential for dashboard routes (maps to Settings.API_KEY on
+    #: the default business). Stored verbatim in v1; rotate via update.
+    api_key: Mapped[str | None] = mapped_column(Text, default=None)
+    #: Cron credential for task routes (maps to Settings.TASK_API_KEY).
+    task_api_key: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class Customer(Base):
     """A business that owes money, plus the payment history the scorer reads."""
 
     __tablename__ = "customers"
+    __table_args__ = (
+        UniqueConstraint("business_id", "customer_id", name="uq_customers_business_customer"),
+        Index("ix_customers_business_id", "business_id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    customer_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    business_id: Mapped[str] = _business_id_column()
+    customer_id: Mapped[str] = mapped_column(String(64))
     name: Mapped[str] = mapped_column(String(255))
     industry: Mapped[str] = mapped_column(String(128), default="")
     email: Mapped[str | None] = mapped_column(String(320), default=None)
@@ -99,9 +151,15 @@ class Invoice(Base):
     """One overdue invoice and the agent's current position on it."""
 
     __tablename__ = "invoices"
+    __table_args__ = (
+        UniqueConstraint("business_id", "invoice_id", name="uq_invoices_business_invoice"),
+        Index("ix_invoices_business_status_due_date", "business_id", "status", "due_date"),
+        Index("ix_invoices_business_payment_link_id", "business_id", "payment_link_id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    invoice_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    business_id: Mapped[str] = _business_id_column()
+    invoice_id: Mapped[str] = mapped_column(String(64))
     customer_pk: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
 
     amount: Mapped[float] = mapped_column(Float)
@@ -128,6 +186,15 @@ class Invoice(Base):
     amount_paid: Mapped[float] = mapped_column(Float, default=0.0)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
+    #: Opaque external IDs from ERP systems, keyed by provider name.
+    #: e.g. {"zoho_invoice_id": "INV-00042", "qbo_invoice_id": "123"}
+    #: Never overwritten by Recoup — ERP owns issued amount and due date;
+    #: Recoup owns collections state.
+    external_ids: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    #: Which system originated this invoice. "batch_ingest" for demo data;
+    #: "zoho_books", "quickbooks", "razorpay_invoices", "tally" for production.
+    erp_source: Mapped[str] = mapped_column(Text, default="batch_ingest")
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
@@ -136,6 +203,7 @@ class Invoice(Base):
     customer: Mapped[Customer] = relationship(back_populates="invoices")
     promises: Mapped[list[Promise]] = relationship(back_populates="invoice")
     contacts: Mapped[list[ContactLog]] = relationship(back_populates="invoice")
+    allocations: Mapped[list[PaymentAllocation]] = relationship(back_populates="invoice")
 
 
 class Promise(Base):
@@ -147,9 +215,14 @@ class Promise(Base):
     """
 
     __tablename__ = "promises"
+    __table_args__ = (
+        UniqueConstraint("business_id", "promise_id", name="uq_promises_business_promise"),
+        Index("ix_promises_business_status", "business_id", "status"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    promise_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    business_id: Mapped[str] = _business_id_column()
+    promise_id: Mapped[str] = mapped_column(String(64))
     invoice_pk: Mapped[int] = mapped_column(ForeignKey("invoices.id"), index=True)
 
     promised_amount: Mapped[float] = mapped_column(Float)
@@ -186,8 +259,10 @@ class ContactLog(Base):
     """
 
     __tablename__ = "contact_logs"
+    __table_args__ = (Index("ix_contact_logs_business_invoice_pk", "business_id", "invoice_pk"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    business_id: Mapped[str] = _business_id_column()
     invoice_pk: Mapped[int] = mapped_column(ForeignKey("invoices.id"), index=True)
     channel: Mapped[ContactChannel] = mapped_column(_enum(ContactChannel, "contact_channel"))
     ladder_step: Mapped[str] = mapped_column(String(64))
@@ -211,9 +286,7 @@ class ContactLog(Base):
     #: arm is how a later reply attributes its reward to the slot that earned
     #: it, which is what keeps the bandit learning from genuine responses.
     timing_arm: Mapped[str | None] = mapped_column(String(32), default=None)
-    scheduled_for: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None
-    )
+    scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
 
@@ -235,9 +308,11 @@ class OptOut(Base):
     __tablename__ = "opt_outs"
     __table_args__ = (
         UniqueConstraint("customer_pk", "channel", name="uq_optout_customer_channel"),
+        Index("ix_opt_outs_business_customer_pk", "business_id", "customer_pk"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    business_id: Mapped[str] = _business_id_column()
     customer_pk: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
     #: NULL means "every channel".
     channel: Mapped[ContactChannel | None] = mapped_column(
@@ -260,9 +335,13 @@ class DecisionTrace(Base):
     """
 
     __tablename__ = "decision_traces"
-    __table_args__ = (Index("ix_decision_traces_invoice_seq", "invoice_id", "seq"),)
+    __table_args__ = (
+        Index("ix_decision_traces_invoice_seq", "invoice_id", "seq"),
+        Index("ix_decision_traces_business_invoice", "business_id", "invoice_id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    business_id: Mapped[str] = _business_id_column()
     #: Monotonic position in the global ledger.
     seq: Mapped[int] = mapped_column(Integer, unique=True, index=True)
     invoice_id: Mapped[str] = mapped_column(String(64), index=True)
@@ -278,18 +357,69 @@ class DecisionTrace(Base):
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class RecoupEventRecord(Base):
+    """Durable event-store stream for event-sourced invoice aggregates.
+
+    ``DecisionTrace`` remains the hash-chained migration ledger. This table is
+    the event-store side of the dual-write: each row names the aggregate
+    version produced by replaying one domain/audit event and stores the
+    projected aggregate state at that version so replay checks can compare the
+    event stream with the ORM row.
+    """
+
+    __tablename__ = "recoup_event_records"
+    __table_args__ = (
+        UniqueConstraint(
+            "business_id",
+            "invoice_id",
+            "version",
+            name="uq_recoup_events_business_invoice_version",
+        ),
+        UniqueConstraint("trace_hash", name="uq_recoup_events_trace_hash"),
+        Index("ix_recoup_events_business_invoice_version", "business_id", "invoice_id", "version"),
+        Index("ix_recoup_events_business_recorded_at", "business_id", "recorded_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    business_id: Mapped[str] = _business_id_column()
+    aggregate_id: Mapped[str] = mapped_column(String(36), index=True)
+    invoice_id: Mapped[str] = mapped_column(String(64), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+
+    #: ``case:opened`` rows have no DecisionTrace counterpart, so trace fields
+    #: are nullable. All hot-path decision events carry the hash-chain pointer.
+    trace_seq: Mapped[int | None] = mapped_column(Integer, default=None)
+    trace_hash: Mapped[str | None] = mapped_column(String(64), default=None)
+
+    event: Mapped[str] = mapped_column(String(128))
+    outcome: Mapped[DecisionOutcome | None] = mapped_column(
+        _enum(DecisionOutcome, "decision_outcome"), default=None
+    )
+    reason: Mapped[str] = mapped_column(Text, default="")
+    actor: Mapped[str] = mapped_column(String(64), default="agent")
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    aggregate_state: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class WebhookEvent(Base):
     """Razorpay webhook deliveries, stored for idempotency.
 
     Razorpay retries on non-2xx and can deliver the same event more than once.
     Counting a payment twice would corrupt the recovery numbers the whole demo
-    is judged on, so the event id is unique and a repeat delivery is a no-op.
+    is judged on, so the event id is unique per business and a repeat delivery
+    is a no-op.
     """
 
     __tablename__ = "webhook_events"
+    __table_args__ = (
+        UniqueConstraint("business_id", "event_id", name="uq_webhook_events_business_event"),
+        Index("ix_webhook_events_business_received_at", "business_id", "received_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    event_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    business_id: Mapped[str] = _business_id_column()
+    event_id: Mapped[str] = mapped_column(String(128))
     event_type: Mapped[str] = mapped_column(String(64), index=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     signature_verified: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -313,8 +443,13 @@ class InboundReply(Base):
     """
 
     __tablename__ = "inbound_replies"
+    __table_args__ = (
+        Index("ix_inbound_replies_business_customer_pk", "business_id", "customer_pk"),
+        Index("ix_inbound_replies_business_received_at", "business_id", "received_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    business_id: Mapped[str] = _business_id_column()
     #: The provider's message id, which is also the idempotency key.
     reply_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
 
@@ -368,8 +503,10 @@ class BatchRunRecord(Base):
     """
 
     __tablename__ = "batch_runs"
+    __table_args__ = (Index("ix_batch_runs_business_created_at", "business_id", "created_at"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    business_id: Mapped[str] = _business_id_column()
     run_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     started_at: Mapped[str] = mapped_column(String(64))
     finished_at: Mapped[str] = mapped_column(String(64), default="")
@@ -405,8 +542,12 @@ class CustomerDriftFlag(Base):
     """
 
     __tablename__ = "customer_drift_flags"
+    __table_args__ = (
+        Index("ix_customer_drift_flags_business_customer_pk", "business_id", "customer_pk"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    business_id: Mapped[str] = _business_id_column()
     customer_pk: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
 
     anomaly_score: Mapped[float] = mapped_column(Float)
@@ -423,3 +564,129 @@ class CustomerDriftFlag(Base):
     )
 
     customer: Mapped[Customer] = relationship(back_populates="drift_flags")
+
+
+class PaymentAllocation(Base):
+    """One unit of settled money, from any source.
+
+    This table is the single source of truth for "how much has been paid
+    against this invoice". ``invoices.amount_paid`` is always derived from
+    ``SUM(payment_allocations.amount)`` for the invoice's pk -- it is never
+    incremented directly. That design means:
+
+    * ``payment.captured`` and ``payment_link.paid`` (which can both fire for
+      the same Razorpay transaction) are keyed by ``(business_id, source,
+      provider_ref)``. The unique constraint turns the second event into a
+      DB-level no-op rather than a double-count.
+    * Operator-entered UTRs and ERP credit notes live in the same table, so
+      a single SUM computes the correct outstanding balance regardless of how
+      money arrived.
+    * ``invoice_pk`` is nullable: a bank UTR enters unmatched (NULL) and is
+      linked to an invoice only after a human confirms the match.
+
+    The ``amount`` column is signed -- negative for credit notes.
+    """
+
+    __tablename__ = "payment_allocations"
+    __table_args__ = (
+        UniqueConstraint(
+            "business_id",
+            "source",
+            "provider_ref",
+            name="uq_payment_allocations_business_source_ref",
+        ),
+        Index("ix_payment_allocations_business_invoice_pk", "business_id", "invoice_pk"),
+        Index("ix_payment_allocations_business_source", "business_id", "source"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    business_id: Mapped[str] = _business_id_column()
+
+    #: FK to the invoice this payment settles. NULL until a human confirms the
+    #: match for bank UTRs; always set for Razorpay webhooks and ERP allocations.
+    invoice_pk: Mapped[int | None] = mapped_column(
+        ForeignKey("invoices.id"), default=None, index=True
+    )
+
+    #: What kind of payment event this is.
+    source: Mapped[AllocationSource] = mapped_column(
+        _enum(AllocationSource, "allocation_source"), index=True
+    )
+    #: The provider's opaque reference: Razorpay payment_id, UTR string, or
+    #: ERP credit note ID.
+    provider_ref: Mapped[str] = mapped_column(String(128))
+
+    #: Positive for receipts, negative for credit notes.
+    amount: Mapped[float] = mapped_column(Float)
+    currency: Mapped[str] = mapped_column(String(3), default="INR")
+
+    #: When the money actually cleared (bank value date / Razorpay captured_at).
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    #: Who wrote this row: "webhook", "operator", "erp_sync".
+    recorded_by: Mapped[str] = mapped_column(String(32), default="webhook")
+
+    #: Payer account hint (IFSC/account number or ERP customer_id), if known.
+    payer_account: Mapped[str | None] = mapped_column(String(128), default=None)
+
+    #: Operator / sync notes, for the review queue.
+    notes: Mapped[str] = mapped_column(Text, default="")
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
+
+    invoice: Mapped[Invoice | None] = relationship(back_populates="allocations")
+
+
+class IntegrationCredential(Base):
+    """OAuth2 / API credentials for one ERP provider, one tenant.
+
+    One row per (business_id, provider). Recoup stores the refresh token
+    verbatim in v1; Wave 3 will encrypt it using the secrets manager before
+    writing. Never log or expose the token columns.
+
+    The ``extra`` JSON bag holds provider-specific state:
+    * Zoho: ``org_id``, ``zoho_account_domain``
+    * QuickBooks: ``realm_id`` (Intuit company ID), ``environment``
+    * Razorpay Invoices: empty (uses global RAZORPAY_KEY_ID / SECRET)
+    * Tally: ``last_import_filename``, ``last_import_rows``
+    """
+
+    __tablename__ = "integration_credentials"
+    __table_args__ = (
+        UniqueConstraint(
+            "business_id",
+            "provider",
+            name="uq_integration_credentials_business_provider",
+        ),
+        Index("ix_integration_credentials_business_id", "business_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    business_id: Mapped[str] = _business_id_column()
+
+    provider: Mapped[IntegrationProvider] = mapped_column(
+        _enum(IntegrationProvider, "integration_provider"), index=True
+    )
+
+    #: Current short-lived access token. May be empty/expired; always refresh
+    #: before use.
+    access_token: Mapped[str] = mapped_column(Text, default="")
+    #: Long-lived token used to mint new access tokens.
+    refresh_token: Mapped[str] = mapped_column(Text, default="")
+    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    #: Space-separated OAuth scopes granted.
+    scope: Mapped[str] = mapped_column(Text, default="")
+
+    #: Provider-specific metadata (org_id, realm_id, etc.).
+    extra: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    last_sync_invoices: Mapped[int] = mapped_column(Integer, default=0)
+    last_sync_errors: Mapped[int] = mapped_column(Integer, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )

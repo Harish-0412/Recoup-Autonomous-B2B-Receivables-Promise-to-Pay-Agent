@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.core.security import require_api_key
+from app.core.tenancy import TenantContext, require_tenant
 from app.db.session import get_db
 from app.models import CustomerDriftFlag
 from app.schemas.drift import DriftDriverOut, DriftFlagListOut, DriftFlagOut
@@ -50,10 +51,13 @@ async def list_flags(
     limit: int = Query(default=50, ge=1, le=200),
     only_flagged: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(require_tenant),
 ) -> DriftFlagListOut:
-    """Recent drift verdicts with their customers, newest first."""
+    """Recent drift verdicts with their customers, newest first, one tenant."""
 
-    rows = await repository.recent_drift_flags(db, limit=limit, only_flagged=only_flagged)
+    rows = await repository.recent_drift_flags(
+        db, tenant.business_id, limit=limit, only_flagged=only_flagged
+    )
     return DriftFlagListOut(
         count=len(rows),
         items=[_to_out(customer.customer_id, customer.name, flag) for flag, customer in rows],
@@ -61,13 +65,17 @@ async def list_flags(
 
 
 @router.get("/flags/{customer_id}", response_model=DriftFlagOut)
-async def latest_flag(customer_id: str, db: AsyncSession = Depends(get_db)) -> DriftFlagOut:
-    """The most recent drift verdict for one customer."""
+async def latest_flag(
+    customer_id: str,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(require_tenant),
+) -> DriftFlagOut:
+    """The most recent drift verdict for one customer in one business."""
 
-    customer = await repository.get_customer(db, customer_id)
+    customer = await repository.get_customer(db, customer_id, tenant.business_id)
     if customer is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Customer {customer_id} not found")
-    flag = await repository.latest_drift_flag_for(db, customer.id)
+    flag = await repository.latest_drift_flag_for(db, customer.id, tenant.business_id)
     if flag is None:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, f"No drift verdict recorded for {customer_id}"

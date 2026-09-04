@@ -160,6 +160,7 @@ async def test_duplicate_reply_is_deduplicated(client: AsyncClient, configure_se
 @pytest.mark.asyncio
 async def test_inbound_opt_out_is_auto_handled(client: AsyncClient, configure_secrets):
     from sqlalchemy import select
+
     from app.db.session import async_session_maker
     from app.models import Customer
 
@@ -190,8 +191,11 @@ async def test_inbound_opt_out_is_auto_handled(client: AsyncClient, configure_se
 
 
 @pytest.mark.asyncio
-async def test_inbound_reply_with_tagged_address_resolves_invoice(client: AsyncClient, configure_secrets):
+async def test_inbound_reply_with_tagged_address_resolves_invoice(
+    client: AsyncClient, configure_secrets
+):
     from sqlalchemy import select
+
     from app.db.session import async_session_maker
     from app.models import Invoice
 
@@ -226,4 +230,3 @@ async def test_inbound_reply_with_tagged_address_resolves_invoice(client: AsyncC
     # It must NOT be rejected as unroutable ("Could not match this reply to an invoice")
     assert "Could not match this reply to an invoice" not in data.get("reason", "")
     assert data["reply_id"] == message_id
-

@@ -5,6 +5,9 @@ about, and the signature decides whether the request is real at all -- and the
 endpoint behind them can create a promise, which silences the agent on a live
 debt. A forged either one is a way to stop collection on any invoice in the
 book.
+
+Wave 1: the address signs ``<business>.<invoice>`` so a valid address from one
+tenant cannot record a promise in another.
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ from app.services.reply_routing import (
     reply_address,
     resolve_from_recipients,
     resolve_invoice_id,
+    resolve_tenant_invoice,
     verify_svix_signature,
 )
 
@@ -33,11 +37,20 @@ DOMAIN = "reply.recoup.test"
 
 
 def test_an_address_round_trips_to_its_invoice():
-    address = reply_address("INV-2026-00042", secret=SECRET, domain=DOMAIN)
+    address = reply_address("INV-2026-00042", secret=SECRET, domain=DOMAIN, business_id="acme")
 
-    assert address.startswith("reply+INV-2026-00042.")
+    assert address.startswith("reply+acme.INV-2026-00042.")
     assert address.endswith(f"@{DOMAIN}")
-    assert resolve_invoice_id(address, secret=SECRET) == "INV-2026-00042"
+    assert resolve_tenant_invoice(address, secret=SECRET) == ("acme", "INV-2026-00042")
+    assert (
+        resolve_invoice_id(address, secret=SECRET, expected_business_id="acme") == "INV-2026-00042"
+    )
+
+
+def test_default_business_when_omitted():
+    address = reply_address("INV-1", secret=SECRET, domain=DOMAIN)
+
+    assert resolve_tenant_invoice(address, secret=SECRET) == ("default", "INV-1")
 
 
 def test_a_forged_address_does_not_resolve():
@@ -47,22 +60,51 @@ def test_a_forged_address_does_not_resolve():
     invoice and have a promise recorded against it.
     """
 
-    assert resolve_invoice_id(f"reply+INV-9999.0000000000000000@{DOMAIN}", secret=SECRET) is None
+    assert (
+        resolve_tenant_invoice(f"reply+acme.INV-9999.0000000000000000@{DOMAIN}", secret=SECRET)
+        is None
+    )
 
 
 def test_an_address_signed_with_another_key_does_not_resolve():
-    address = reply_address("INV-1", secret="a-different-secret", domain=DOMAIN)
+    address = reply_address("INV-1", secret="a-different-secret", domain=DOMAIN, business_id="acme")
 
-    assert resolve_invoice_id(address, secret=SECRET) is None
+    assert resolve_tenant_invoice(address, secret=SECRET) is None
 
 
 def test_the_tag_is_bound_to_the_invoice_it_names():
     """Swapping the invoice id while keeping a valid tag must fail."""
 
-    valid = reply_address("INV-1", secret=SECRET, domain=DOMAIN)
+    valid = reply_address("INV-1", secret=SECRET, domain=DOMAIN, business_id="acme")
     tag = valid.split(".")[-1].split("@")[0]
 
-    assert resolve_invoice_id(f"reply+INV-2.{tag}@{DOMAIN}", secret=SECRET) is None
+    assert resolve_tenant_invoice(f"reply+acme.INV-2.{tag}@{DOMAIN}", secret=SECRET) is None
+
+
+def test_the_tag_is_bound_to_the_business_it_names():
+    """Cross-tenant forgery: A's valid tag presented as B must fail."""
+
+    valid = reply_address("INV-1042", secret=SECRET, domain=DOMAIN, business_id="acme")
+    tag = valid.split(".")[-1].split("@")[0]
+
+    forged = f"reply+globex.INV-1042.{tag}@{DOMAIN}"
+    assert resolve_tenant_invoice(forged, secret=SECRET) is None
+    assert resolve_invoice_id(forged, secret=SECRET, expected_business_id="globex") is None
+    # And the reverse: A's address does not resolve when B is expected.
+    assert resolve_invoice_id(valid, secret=SECRET, expected_business_id="globex") is None
+    assert resolve_invoice_id(valid, secret=SECRET, expected_business_id="acme") == "INV-1042"
+
+
+def test_legacy_single_tenant_address_resolves_to_default():
+    """Pre-Wave-1 in-flight mail keeps working, scoped to the default business."""
+
+    import hmac as hmac_mod
+
+    legacy_tag = hmac_mod.new(SECRET.encode(), b"INV-9", hashlib.sha256).hexdigest()[:16]
+    assert resolve_tenant_invoice(f"reply+INV-9.{legacy_tag}@{DOMAIN}", secret=SECRET) == (
+        "default",
+        "INV-9",
+    )
 
 
 @pytest.mark.parametrize(
@@ -70,24 +112,27 @@ def test_the_tag_is_bound_to_the_invoice_it_names():
     ["", "plain@example.com", "reply+INV-1@example.com", "reply+.abcdef@example.com", "garbage"],
 )
 def test_addresses_that_are_not_ours_resolve_to_nothing(address):
-    assert resolve_invoice_id(address, secret=SECRET) is None
+    assert resolve_tenant_invoice(address, secret=SECRET) is None
 
 
 def test_a_display_name_wrapper_is_tolerated():
     """Mail clients send 'Name <addr>'; the address is still in there."""
 
-    address = reply_address("INV-7", secret=SECRET, domain=DOMAIN)
+    address = reply_address("INV-7", secret=SECRET, domain=DOMAIN, business_id="acme")
 
-    assert resolve_invoice_id(f"Recoup Billing <{address}>", secret=SECRET) == "INV-7"
+    assert resolve_tenant_invoice(f"Recoup Billing <{address}>", secret=SECRET) == (
+        "acme",
+        "INV-7",
+    )
 
 
 def test_every_recipient_is_checked_not_just_the_first():
     """A 'reply all' can leave our address in cc rather than to."""
 
-    address = reply_address("INV-8", secret=SECRET, domain=DOMAIN)
+    address = reply_address("INV-8", secret=SECRET, domain=DOMAIN, business_id="acme")
     recipients = ["accounts@customer.example", "someone@else.example", address]
 
-    assert resolve_from_recipients(recipients, secret=SECRET) == "INV-8"
+    assert resolve_from_recipients(recipients, secret=SECRET) == ("acme", "INV-8")
 
 
 def test_no_recipients_resolves_to_nothing():

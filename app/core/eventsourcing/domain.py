@@ -26,24 +26,27 @@ class InvoiceCaseAggregate(Aggregate):
         amount: float,
         due_date: str,
         currency: str = "INR",
+        amount_paid: float = 0.0,
+        escalation_state: str = "monitoring",
+        ladder_index: int = 0,
     ) -> None:
         self.invoice_id = invoice_id
         self.customer_id = customer_id
         self.original_amount = float(amount)
-        self.outstanding_amount = float(amount)
+        self.outstanding_amount = max(float(amount) - float(amount_paid), 0.0)
         self.currency = currency
         self.due_date = due_date
-        self.escalation_state = "monitoring"
-        self.ladder_index = 0
+        self.escalation_state = escalation_state
+        self.ladder_index = int(ladder_index)
         self.contacts_count = 0
         self.p_recovery = 0.0
         self.expected_value = 0.0
         self.urgency_tier = "WAIT"
         self.is_promised = False
         self.active_promise: dict[str, Any] | None = None
-        self.is_paid = False
+        self.is_paid = self.outstanding_amount == 0.0
         self.is_disputed = False
-        self.is_closed = False
+        self.is_closed = self.is_paid or escalation_state in {"closed", "human_handoff"}
         self.interventions: list[dict[str, Any]] = []
         self.decision_log: list[dict[str, Any]] = []
 
@@ -97,7 +100,6 @@ class InvoiceCaseAggregate(Aggregate):
     ) -> None:
         """Record an outbound reminder/notice dispatch."""
         self.contacts_count += 1
-        self.ladder_index += 1
         intervention_record = {
             "channel": channel,
             "ladder_step": ladder_step,
@@ -117,6 +119,9 @@ class InvoiceCaseAggregate(Aggregate):
     ) -> None:
         """Record state machine escalation transitions."""
         self.escalation_state = to_state
+        self.ladder_index += 1
+        if to_state in {"closed", "human_handoff"}:
+            self.is_closed = True
         self.decision_log.append(
             {
                 "event": "state_transitioned",

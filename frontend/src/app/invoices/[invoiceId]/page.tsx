@@ -249,6 +249,12 @@ export default function CaseFilePage({ params }: { params: Promise<{ invoiceId: 
                     ) : (
                       <p className="text-sm text-zinc-400">None yet — run a cycle.</p>
                     )}
+                    <Link
+                      href={`/payments?invoice_id=${encodeURIComponent(invoice.invoice_id)}`}
+                      className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 hover:underline"
+                    >
+                      Record Bank Transfer / UTR <ArrowRight className="h-3 w-3" />
+                    </Link>
                   </div>
                 </div>
               </div>

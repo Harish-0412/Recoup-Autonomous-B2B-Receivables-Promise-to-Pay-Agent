@@ -11,7 +11,8 @@ from typing import Any
 
 from eventsourcing.application import Application
 
-from app.core.audit import DecisionTraceEntry
+from app.core.audit import DecisionLedger, DecisionTraceEntry
+from app.core.domain import CaseSnapshot
 from app.core.eventsourcing.domain import InvoiceCaseAggregate
 from app.models.enums import DecisionOutcome
 
@@ -31,6 +32,9 @@ class RecoupEventApp(Application):
         amount: float,
         due_date: str,
         currency: str = "INR",
+        amount_paid: float = 0.0,
+        escalation_state: str = "monitoring",
+        ladder_index: int = 0,
     ) -> uuid.UUID:
         """Initialize a new event-sourced case for an invoice."""
         agg_id = invoice_id_to_uuid(invoice_id)
@@ -44,9 +48,26 @@ class RecoupEventApp(Application):
             amount=amount,
             due_date=due_date,
             currency=currency,
+            amount_paid=amount_paid,
+            escalation_state=escalation_state,
+            ladder_index=ladder_index,
         )
         self.save(aggregate)
         return aggregate.id
+
+    def open_case_from_snapshot(self, case: CaseSnapshot) -> uuid.UUID:
+        """Open a stream from the exact CaseSnapshot the agent is deciding on."""
+
+        return self.open_case(
+            invoice_id=case.invoice.invoice_id,
+            customer_id=case.customer.customer_id,
+            amount=case.invoice.amount,
+            due_date=case.invoice.due_date.isoformat(),
+            currency=case.invoice.currency,
+            amount_paid=case.invoice.amount_paid,
+            escalation_state=case.invoice.escalation_state.value,
+            ladder_index=case.invoice.ladder_index,
+        )
 
     def case_exists(self, invoice_id: str) -> bool:
         """Check if an aggregate exists for this invoice ID."""
@@ -231,7 +252,16 @@ class RecoupEventApp(Application):
             amount = float(payload.get("outstanding") or payload.get("amount") or 10000.0)
             customer_id = str(payload.get("customer_id") or "CUST-UNKNOWN")
             due_date = str(payload.get("due_date") or "2026-09-01")
-            self.open_case(invoice_id, customer_id, amount, due_date)
+            self.open_case(
+                invoice_id,
+                customer_id,
+                amount,
+                due_date,
+                currency=str(payload.get("currency") or "INR"),
+                amount_paid=float(payload.get("amount_paid", 0.0)),
+                escalation_state=str(payload.get("escalation_state") or "monitoring"),
+                ladder_index=int(payload.get("ladder_index", 0)),
+            )
 
         event_name = entry.event.lower()
         payload = entry.payload
@@ -249,6 +279,13 @@ class RecoupEventApp(Application):
                 invoice_id=invoice_id,
                 allowed=entry.outcome == DecisionOutcome.APPROVED,
                 rule_name=str(payload.get("rule", "")),
+                reason=entry.reason,
+            )
+        elif event_name.startswith("transition:"):
+            self.record_state_transition(
+                invoice_id=invoice_id,
+                to_state=str(payload.get("to_state") or payload.get("state_after") or "monitoring"),
+                trigger=str(payload.get("trigger") or event_name.removeprefix("transition:")),
                 reason=entry.reason,
             )
         elif any(k in event_name for k in ("execute", "sent", "send", "contact", "intervention")):
@@ -276,3 +313,34 @@ class RecoupEventApp(Application):
                 amount=float(payload.get("amount", 0.0)),
                 payment_id=str(payload.get("payment_id", "pay_manual")),
             )
+
+
+class EventSourcedDecisionLedger(DecisionLedger):
+    """Decision ledger that mirrors every append into ``RecoupEventApp``.
+
+    API and batch-run paths use this during the dual-write window. Existing
+    unit tests and pure scoring helpers can keep using ``DecisionLedger`` when
+    they need no durable aggregate stream.
+    """
+
+    def __init__(self, event_app: RecoupEventApp | None = None) -> None:
+        super().__init__()
+        self.event_app = event_app or RecoupEventApp()
+        self._opened_invoice_ids: set[str] = set()
+        self.event_versions_by_hash: dict[str, int] = {}
+
+    def open_case_from_snapshot(self, case: CaseSnapshot) -> None:
+        self.event_app.open_case_from_snapshot(case)
+        self._opened_invoice_ids.add(case.invoice_id)
+
+    @property
+    def opened_invoice_ids(self) -> frozenset[str]:
+        return frozenset(self._opened_invoice_ids)
+
+    def append(self, **kwargs: Any) -> DecisionTraceEntry:
+        entry = super().append(**kwargs)
+        self.event_app.bridge_decision_trace(entry)
+        self.event_versions_by_hash[entry.entry_hash] = self.event_app.get_case(
+            entry.invoice_id
+        ).version
+        return entry

@@ -103,15 +103,20 @@ def test_api_key_prefers_but_does_not_require_api_key(operator_key):
 
 
 def test_unconfigured_api_key_denies_rather_than_allows(monkeypatch):
-    get_settings.cache_clear()
+    import app.core.config as cfg
+
     monkeypatch.setenv("TASK_API_KEY", "")
     monkeypatch.setenv("API_KEY", "")
-    try:
-        with pytest.raises(HTTPException) as caught:
-            require_api_key("Bearer anything")
-        assert caught.value.status_code == 503
-    finally:
-        get_settings.cache_clear()
+    # _env_file=None is load-bearing: pydantic-settings lets a local .env
+    # win over an *empty* env var, so a developer's .env key would leak into
+    # this assertion and turn the expected 503 into a 401.
+    monkeypatch.setattr(
+        "app.core.security.get_settings",
+        lambda: cfg.Settings(_env_file=None, APP_ENV="development"),
+    )
+    with pytest.raises(HTTPException) as caught:
+        require_api_key("Bearer anything")
+    assert caught.value.status_code == 503
 
 
 # --- the perimeter, over HTTP ---------------------------------------------------
@@ -130,6 +135,7 @@ PROTECTED = [
     ("POST", "/api/v1/replies/r1/reviewed"),
     ("POST", "/api/v1/replies/classify-preview"),
     ("GET", "/api/v1/schedule/next_time?customer_id=C-1"),
+    ("POST", "/score/broken_promise"),
     ("POST", "/api/score/broken_promise"),
     ("POST", "/api/v1/score/broken_promise"),
     ("GET", "/api/v1/forecast/cash"),
@@ -176,6 +182,7 @@ PUBLIC_MODEL_CARDS = [
     "/api/v1/models/recovery/card",
     "/api/v1/models/drift/card",
     "/api/v1/models/timing/card",
+    "/score/broken_promise/card",
     "/api/score/broken_promise/card",
     "/api/v1/score/broken_promise/card",
 ]
@@ -192,26 +199,28 @@ async def test_model_cards_stay_public(async_client, operator_key):
 # --- rate limits -----------------------------------------------------------------
 
 
-def test_sliding_window_allows_burst_then_denies_with_retry_after():
-    clear()
+@pytest.mark.asyncio
+async def test_sliding_window_allows_burst_then_denies_with_retry_after():
+    await clear()
     key = "test-scope:127.0.0.1"
     for _ in range(5):
-        allowed, _ = check_allowed(key, limit=5)
+        allowed, _ = await check_allowed(key, limit=5)
         assert allowed is True
-    allowed, retry_after = check_allowed(key, limit=5)
+    allowed, retry_after = await check_allowed(key, limit=5)
     assert allowed is False
     assert retry_after > 0
-    clear()
-    allowed, _ = check_allowed(key, limit=5)
+    await clear()
+    allowed, _ = await check_allowed(key, limit=5)
     assert allowed is True
-    clear()
+    await clear()
 
 
-def test_buckets_are_scoped_per_key():
-    clear()
-    allowed_a, _ = check_allowed("scope:1.1.1.1", limit=1)
-    allowed_b, _ = check_allowed("scope:2.2.2.2", limit=1)
+@pytest.mark.asyncio
+async def test_buckets_are_scoped_per_key():
+    await clear()
+    allowed_a, _ = await check_allowed("scope:1.1.1.1", limit=1)
+    allowed_b, _ = await check_allowed("scope:2.2.2.2", limit=1)
     assert (allowed_a, allowed_b) == (True, True)
-    denied, _ = check_allowed("scope:1.1.1.1", limit=1)
+    denied, _ = await check_allowed("scope:1.1.1.1", limit=1)
     assert denied is False
-    clear()
+    await clear()

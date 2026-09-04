@@ -198,10 +198,10 @@ export default function SimulatePage() {
   });
   const [from, setFrom] = useState("2026-06-01");
   const [to, setTo] = useState("2026-09-01");
-  const [previewMode, setPreviewMode] = useState(true);
+  const [previewMode, setPreviewMode] = useState(false);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<PolicySimulateResponse | null>(null);
-  const [usedPreview, setUsedPreview] = useState(true);
+  const [usedPreview, setUsedPreview] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [caseFilter, setCaseFilter] = useState<"all" | "up" | "down" | "same">("all");
   const [showContract, setShowContract] = useState(false);
@@ -251,16 +251,16 @@ export default function SimulatePage() {
             <ArrowLeft className="h-3.5 w-3.5" /> dashboard
           </Link>
           <label className="inline-flex items-center gap-2 text-xs font-mono cursor-pointer">
-            <span className={previewMode ? "text-orange-600 dark:text-orange-400 font-bold" : "text-zinc-400"}>
-              Preview — connect backend
+            <span className={!previewMode ? "text-emerald-600 dark:text-emerald-400 font-bold" : "text-zinc-400"}>
+              {!previewMode ? "● Live Engine Connected" : "Preview Mode"}
             </span>
             <button
               role="switch"
-              aria-checked={previewMode}
+              aria-checked={!previewMode}
               onClick={() => setPreviewMode((v) => !v)}
-              className={cn("w-10 h-5.5 h-[22px] rounded-full p-0.5 transition-colors", previewMode ? "bg-orange-500" : "bg-zinc-300 dark:bg-zinc-700")}
+              className={cn("w-10 h-[22px] rounded-full p-0.5 transition-colors", !previewMode ? "bg-emerald-500" : "bg-zinc-300 dark:bg-zinc-700")}
             >
-              <span className={cn("block h-4 w-4 rounded-full bg-white transition-transform", previewMode && "translate-x-[18px]")} />
+              <span className={cn("block h-4 w-4 rounded-full bg-white transition-transform", !previewMode && "translate-x-[18px]")} />
             </button>
           </label>
         </div>
@@ -271,10 +271,9 @@ export default function SimulatePage() {
           </p>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">What if we moved the ceilings?</h1>
           <p className="text-sm text-zinc-500 max-w-3xl">
-            Counterfactual replay over last quarter&apos;s decision traces with swapped policy ceilings.
-            The replay engine is not built yet — this page runs in labelled preview mode against the
-            real contract (<span className="font-mono text-xs">POST /policy/simulate</span>, currently 501),
-            so backend and frontend can ship in parallel without faking results.
+            Counterfactual replay over customer and invoice case snapshots with swapped policy ceilings.
+            The replay engine executes live (<span className="font-mono text-xs">POST /policy/simulate</span>),
+            replaying decision cycles with policy and scoring overrides without sending outbound communications.
           </p>
         </section>
 
@@ -287,9 +286,8 @@ export default function SimulatePage() {
             >
               <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
               <span>
-                <strong>Preview numbers — illustrative, not engine output.</strong> Direction-aware mock
-                computed from your overrides so the layout, deltas, and table are reviewable today.
-                Flip the toggle off and hit Replay to call the real endpoint (501 until the engine ships).
+                <strong>Preview numbers — illustrative fallback.</strong> Direction-aware mock
+                computed from your overrides. Toggle to Live Engine to run the real counterfactual simulator over snapshot cases.
               </span>
             </motion.div>
           )}
@@ -342,7 +340,7 @@ export default function SimulatePage() {
   "replay_window": { "from": "${from}", "to": "${to}" } }
 → { baseline: {...}, simulated: {...},
     delta: {...}, cases_affected: [...] }
-501 until the replay engine ships.`}
+Engine live: counterfactual replay active.`}
               </pre>
             )}
           </section>

@@ -103,14 +103,19 @@ def test_graceful_degradation() -> None:
 
 @pytest.mark.asyncio
 async def test_fastapi_endpoints() -> None:
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
         # POST /api/score/broken_promise without credentials must fail with 401 or 503
-        anon_res = await client.post("/api/score/broken_promise", json={
-            "customer_broken_promise_rate": 0.05,
-            "customer_on_time_ratio_90d": 0.92,
-            "days_overdue_at_scoring": 4,
-            "promise_horizon_days": 3,
-        })
+        anon_res = await client.post(
+            "/api/score/broken_promise",
+            json={
+                "customer_broken_promise_rate": 0.05,
+                "customer_on_time_ratio_90d": 0.92,
+                "days_overdue_at_scoring": 4,
+                "promise_horizon_days": 3,
+            },
+        )
         assert anon_res.status_code in (401, 503)
 
         # GET /api/score/broken_promise/card is intentionally public
@@ -124,12 +129,15 @@ async def test_fastapi_endpoints() -> None:
         # Authenticated POST /api/score/broken_promise succeeds
         app.dependency_overrides[require_api_key] = lambda: None
         try:
-            res = await client.post("/api/score/broken_promise", json={
-                "customer_broken_promise_rate": 0.05,
-                "customer_on_time_ratio_90d": 0.92,
-                "days_overdue_at_scoring": 4,
-                "promise_horizon_days": 3,
-            })
+            res = await client.post(
+                "/api/score/broken_promise",
+                json={
+                    "customer_broken_promise_rate": 0.05,
+                    "customer_on_time_ratio_90d": 0.92,
+                    "days_overdue_at_scoring": 4,
+                    "promise_horizon_days": 3,
+                },
+            )
             assert res.status_code == 200
             body = res.json()
             assert "risk_score" in body

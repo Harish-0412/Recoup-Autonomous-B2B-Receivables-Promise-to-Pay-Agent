@@ -35,6 +35,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import bind_logger, get_logger
+from app.core.observability import create_span, set_span_attribute_dict
 from app.models.enums import ContactChannel, DeliveryStatus
 from app.models.tables import Invoice
 from app.services import repository
@@ -73,7 +74,11 @@ class ExecutionService:
         """Reuse the invoice's live link, or create one. Returns (link, error)."""
 
         if invoice.payment_link_id and invoice.payment_link_url:
-            existing = await self.gateways.payments.fetch_payment_link(invoice.payment_link_id)
+            with create_span(
+                "razorpay.payment_link.fetch", link_id=invoice.payment_link_id
+            ) as span:
+                existing = await self.gateways.payments.fetch_payment_link(invoice.payment_link_id)
+            set_span_attribute_dict(span, {"ok": existing.ok, "error": existing.error or None})
             # A fetch failure is not fatal: we would rather mint a new link than
             # abandon the send because Razorpay could not describe the old one.
             if existing.ok and (existing.payload or {}).get("status") in _PAYABLE_LINK_STATES:
@@ -87,20 +92,25 @@ class ExecutionService:
                     None,
                 )
 
-        created = await self.gateways.payments.create_payment_link(
-            amount=intent.payable_amount,
-            currency=intent.case.invoice.currency,
-            description=templates.payment_link_description(intent),
-            customer_name=intent.case.customer.name,
-            customer_email=intent.recipient or "",
-            # Carried on the link so the webhook can find its way home even if
-            # the local payment_link_id were ever lost.
-            notes={
-                "invoice_id": intent.invoice_id,
-                "customer_id": intent.case.customer.customer_id,
-                "ladder_step": intent.ladder_step,
-            },
-        )
+        with create_span("razorpay.payment_link.create") as span:
+            created = await self.gateways.payments.create_payment_link(
+                amount=intent.payable_amount,
+                currency=intent.case.invoice.currency,
+                description=templates.payment_link_description(intent),
+                customer_name=intent.case.customer.name,
+                customer_email=intent.recipient or "",
+                # Carried on the link so the webhook can find its way home even if
+                # the local payment_link_id were ever lost. business_id scopes the
+                # webhook lookup to one tenant: a colliding link id in another
+                # business must never close this invoice.
+                notes={
+                    "business_id": invoice.business_id,
+                    "invoice_id": intent.invoice_id,
+                    "customer_id": intent.case.customer.customer_id,
+                    "ladder_step": intent.ladder_step,
+                },
+            )
+        set_span_attribute_dict(span, {"ok": created.ok, "error": created.error or None})
         if not created.ok:
             return None, created.error or "payment link creation failed"
 
@@ -133,6 +143,7 @@ class ExecutionService:
         await repository.record_contact(
             session,
             invoice,
+            invoice.business_id,
             channel=result.channel,
             ladder_step=intent.ladder_step,
             subject=result.subject or (message.subject if message else ""),
@@ -184,8 +195,13 @@ class ExecutionService:
             # has no address. Recorded so it shows up as a data problem.
             result = ExecutionResult.failure(intent, "customer has no email address on file")
             await self._record(
-                session, invoice, intent, result, None,
-                timing_arm=timing_arm, scheduled_for=scheduled_for,
+                session,
+                invoice,
+                intent,
+                result,
+                None,
+                timing_arm=timing_arm,
+                scheduled_for=scheduled_for,
             )
             log.warning("Cannot contact customer", reason="no_email")
             return result
@@ -216,8 +232,13 @@ class ExecutionService:
                     body_preview=message.preview(),
                 )
                 await self._record(
-                    session, invoice, intent, result, message,
-                    timing_arm=timing_arm, scheduled_for=scheduled_for,
+                    session,
+                    invoice,
+                    intent,
+                    result,
+                    message,
+                    timing_arm=timing_arm,
+                    scheduled_for=scheduled_for,
                 )
                 log.warning("Payment link failed; nothing sent", error=link_error)
                 return result
@@ -227,17 +248,20 @@ class ExecutionService:
         # The tagged Reply-To is what closes the loop: a customer's reply comes
         # back to an address that names, and signs, the invoice it belongs to,
         # so the inbound handler never has to guess from a subject line.
-        sent = await self.gateways.email.send_email(
-            to=recipient,
-            subject=message.subject,
-            html=message.html,
-            text=message.text,
-            reply_to=reply_address(
-                intent.invoice_id,
-                secret=self.settings.REPLY_ADDRESS_SECRET,
-                domain=self.settings.REPLY_INBOUND_DOMAIN,
-            ),
-        )
+        with create_span("resend.emails.send") as span:
+            sent = await self.gateways.email.send_email(
+                to=recipient,
+                subject=message.subject,
+                html=message.html,
+                text=message.text,
+                reply_to=reply_address(
+                    intent.invoice_id,
+                    secret=self.settings.REPLY_ADDRESS_SECRET,
+                    domain=self.settings.REPLY_INBOUND_DOMAIN,
+                    business_id=invoice.business_id,
+                ),
+            )
+        set_span_attribute_dict(span, {"ok": sent.ok, "error": sent.error or None})
 
         if not sent.ok:
             result = ExecutionResult.failure(
@@ -254,8 +278,13 @@ class ExecutionService:
                     update={"payment_link_url": link.url, "payment_link_reused": link.reused}
                 )
             await self._record(
-                session, invoice, intent, result, message,
-                timing_arm=timing_arm, scheduled_for=scheduled_for,
+                session,
+                invoice,
+                intent,
+                result,
+                message,
+                timing_arm=timing_arm,
+                scheduled_for=scheduled_for,
             )
             log.warning("Send failed; ladder not advanced", error=sent.error)
             return result
@@ -275,8 +304,13 @@ class ExecutionService:
             amount_requested=intent.payable_amount,
         )
         await self._record(
-            session, invoice, intent, result, message,
-            timing_arm=timing_arm, scheduled_for=scheduled_for,
+            session,
+            invoice,
+            intent,
+            result,
+            message,
+            timing_arm=timing_arm,
+            scheduled_for=scheduled_for,
         )
         log.info(
             "Delivered",

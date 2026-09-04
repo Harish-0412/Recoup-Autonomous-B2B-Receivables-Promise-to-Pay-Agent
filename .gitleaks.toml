@@ -1,0 +1,25 @@
+# Gitleaks configuration for the CI secret-scan job.
+#
+# Default rules otherwise flag deterministic fixtures as secrets. Each entry
+# below is a path (regex against the repo-relative path) whose contents are
+# known non-secrets:
+#   * docs/ml_models_validation_report.json -- the Wave-3 ML validation report
+#     records the Razorpay *test* key id that was used to run the verification.
+#     Test key ids are published credentials; the report is evidence, not a leak.
+#   * tests/test_config.py -- REAL_PRODUCTION fixtures use rzp_live_* marker
+#     strings on purpose (a placeholder that production must refuse to boot
+#     with). They are not live key material.
+#   * scratch/mypy_cache -- a mypy cache directory that was accidentally
+#     committed in an early snapshot; its .meta.json files contain random hex
+#     that trips the generic/facebook-token heuristics.
+#
+# Anything outside these paths still fails the scan: do not widen the list to
+# silence a real finding -- fix or remove the secret instead.
+
+[allowlist]
+description = "Deterministic fixtures and build caches, not live secrets"
+paths = [
+    '''docs/ml_models_validation_report\.json''',
+    '''tests/test_config\.py''',
+    '''scratch/mypy_cache/.*''',
+]

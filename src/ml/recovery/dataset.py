@@ -16,16 +16,34 @@ teaching the model that recent invoices fail.
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 import numpy as np
 import pandas as pd
 
-from app.core.domain import CaseSnapshot, snapshot_from_generated
+from app.core.domain import CaseSnapshot, CustomerSnapshot, InvoiceSnapshot, snapshot_from_generated
 from src.data.synthetic_generator import Customer, Invoice, SyntheticBatch
 from src.ml.features.recovery_features import FEATURE_COLUMNS_V1, build_recovery_features
 
 LABEL_COLUMN = "recovered_within_horizon"
+
+
+@dataclass(frozen=True)
+class LabeledRecord:
+    """One point-in-time training row from any label source.
+
+    ``features`` must carry exactly ``FEATURE_COLUMNS_V1`` and be valid as of
+    ``scored_at``: synthetic rows compute them from the generator, warehouse
+    rows read them frozen from ``scored`` decision traces. ``scored_at`` is the
+    evaluation instant the 30-day label window opens at -- never a due date.
+    """
+
+    invoice_id: str
+    customer_id: str
+    scored_at: date
+    features: dict[str, float]
+    label: int
+    amount: float
 
 
 @dataclass(frozen=True)
@@ -108,13 +126,86 @@ def features_frame(cases: Sequence[CaseSnapshot]) -> pd.DataFrame:
     return frame.astype("float64")
 
 
-def build_dataset(
-    batch: SyntheticBatch,
+def records_from_synthetic(batch: SyntheticBatch) -> list[LabeledRecord]:
+    """Adapt a generated batch into source-agnostic training rows."""
+
+    mature = batch.mature_invoices()
+    cases = build_cases(mature, batch.customers)
+    records: list[LabeledRecord] = []
+    for invoice, case in zip(mature, cases, strict=True):
+        records.append(
+            LabeledRecord(
+                invoice_id=invoice.invoice_id,
+                customer_id=invoice.customer_id,
+                scored_at=invoice.flagged_date,
+                features=build_recovery_features(case),
+                label=1 if invoice.recovered else 0,
+                amount=float(invoice.amount),
+            )
+        )
+    return records
+
+
+def cases_from_records(records: Sequence[LabeledRecord]) -> list[CaseSnapshot]:
+    """Rebuild evaluation snapshots from stored point-in-time features.
+
+    Used only to run the rules-based incumbent over warehouse holdouts: every
+    field the rules scorer reads is present in the frozen vector, with dates
+    re-anchored at ``scored_at``. These snapshots never train anything.
+    """
+
+    cases: list[CaseSnapshot] = []
+    for record in records:
+        feats = record.features
+        due_date = record.scored_at - timedelta(days=int(feats["days_overdue_at_scoring"]))
+        issue_date = record.scored_at - timedelta(days=int(feats["invoice_age_days"]))
+        cases.append(
+            CaseSnapshot(
+                invoice=InvoiceSnapshot(
+                    invoice_id=record.invoice_id,
+                    customer_id=record.customer_id,
+                    amount=max(record.amount, 1.0),
+                    issue_date=issue_date,
+                    due_date=due_date,
+                    payment_terms_days=max(int(feats["payment_terms_days"]), 1),
+                    as_of=record.scored_at,
+                    days_overdue=int(feats["days_overdue_at_scoring"]),
+                    ladder_index=int(feats["current_escalation_tier"]),
+                    prior_reminders_sent=int(feats["prior_reminders_sent"]),
+                    days_since_last_contact=int(feats["days_since_last_contact"]),
+                    has_prior_promise=bool(feats["has_prior_promise"]),
+                    prior_promise_kept=(
+                        None
+                        if not feats["has_prior_promise"]
+                        else bool(feats["prior_promise_kept"] > 0.5)
+                    ),
+                ),
+                customer=CustomerSnapshot(
+                    customer_id=record.customer_id,
+                    tenure_months=int(feats["customer_tenure_months"]),
+                    invoice_count=int(feats["customer_invoice_count"]),
+                    avg_invoice_amount=float(feats["invoice_amount"])
+                    / max(float(feats["invoice_amount_vs_customer_avg_ratio"]), 1e-6),
+                    on_time_ratio_90d=float(feats["customer_on_time_ratio_90d"]),
+                    on_time_ratio_all_time=float(feats["customer_on_time_ratio_all_time"]),
+                    avg_days_late=float(feats["customer_avg_days_late"]),
+                    prior_broken_promises_count=int(feats["customer_broken_promises_count"]),
+                    prior_disputes_count=int(feats["customer_dispute_count"]),
+                ),
+            )
+        )
+    return cases
+
+
+def build_dataset_from_records(
+    records: Sequence[LabeledRecord],
     *,
+    horizon_days: int,
+    seed: int,
     train_fraction: float = 0.70,
     validation_fraction: float = 0.15,
 ) -> RecoveryDataset:
-    """Turn a generated batch into temporally split, leakage-safe slices."""
+    """Temporal split over any label source, cut on scored dates not indices."""
 
     if not 0.0 < train_fraction < 1.0:
         raise ValueError("train_fraction must be in (0, 1)")
@@ -122,18 +213,13 @@ def build_dataset(
         raise ValueError("validation_fraction must be in [0, 1)")
     if train_fraction + validation_fraction >= 1.0:
         raise ValueError("train and validation fractions must leave room for a test split")
+    if not records:
+        raise ValueError("no labelled rows; run the ETL (or generator) first")
 
-    mature = batch.mature_invoices()
-    if not mature:
-        raise ValueError(
-            "no invoices have a mature label; generate with a longer timeline_days "
-            "than horizon_days"
-        )
+    ordered = sorted(records, key=lambda record: (record.scored_at, record.invoice_id))
+    flag_dates = [record.scored_at for record in ordered]
 
-    ordered = sorted(mature, key=lambda invoice: (invoice.flagged_date, invoice.invoice_id))
-    flag_dates = [invoice.flagged_date for invoice in ordered]
-
-    # Cut on dates, not row indices, so every invoice flagged on a given day
+    # Cut on dates, not row indices, so every invoice scored on a given day
     # lands in the same split. Splitting mid-day would leak same-day
     # information across the boundary.
     train_end = flag_dates[min(int(len(ordered) * train_fraction), len(ordered) - 1)]
@@ -144,30 +230,30 @@ def build_dataset(
     if validation_end <= train_end:
         validation_end = train_end
 
-    buckets: dict[str, list[Invoice]] = {"train": [], "validation": [], "test": []}
-    for invoice in ordered:
-        if invoice.flagged_date < train_end:
-            buckets["train"].append(invoice)
-        elif invoice.flagged_date < validation_end:
-            buckets["validation"].append(invoice)
+    buckets: dict[str, list[LabeledRecord]] = {"train": [], "validation": [], "test": []}
+    for record in ordered:
+        if record.scored_at < train_end:
+            buckets["train"].append(record)
+        elif record.scored_at < validation_end:
+            buckets["validation"].append(record)
         else:
-            buckets["test"].append(invoice)
+            buckets["test"].append(record)
 
-    for name, invoices in buckets.items():
-        if not invoices:
-            raise ValueError(
-                f"the {name} split is empty; widen timeline_days or increase batch_size"
-            )
+    for name, bucket in buckets.items():
+        if not bucket:
+            raise ValueError(f"the {name} split is empty; widen the scored window or add rows")
 
     splits: dict[str, RecoverySplit] = {}
-    for name, invoices in buckets.items():
-        cases = build_cases(invoices, batch.customers)
+    for name, bucket in buckets.items():
         splits[name] = RecoverySplit(
             name=name,
-            features=features_frame(cases),
-            labels=np.array([1 if invoice.recovered else 0 for invoice in invoices], dtype=int),
-            cases=cases,
-            flag_dates=[invoice.flagged_date for invoice in invoices],
+            features=pd.DataFrame(
+                [record.features for record in bucket],
+                columns=list(FEATURE_COLUMNS_V1),
+            ).astype("float64"),
+            labels=np.array([record.label for record in bucket], dtype=int),
+            cases=cases_from_records(bucket),
+            flag_dates=[record.scored_at for record in bucket],
         )
 
     return RecoveryDataset(
@@ -175,8 +261,31 @@ def build_dataset(
         validation=splits["validation"],
         test=splits["test"],
         feature_columns=FEATURE_COLUMNS_V1,
-        horizon_days=batch.horizon_days,
-        seed=batch.seed,
+        horizon_days=horizon_days,
+        seed=seed,
         train_end=train_end,
         validation_end=validation_end,
+    )
+
+
+def build_dataset(
+    batch: SyntheticBatch,
+    *,
+    train_fraction: float = 0.70,
+    validation_fraction: float = 0.15,
+) -> RecoveryDataset:
+    """Turn a generated batch into temporally split, leakage-safe slices."""
+
+    mature = batch.mature_invoices()
+    if not mature:
+        raise ValueError(
+            "no invoices have a mature label; generate with a longer timeline_days "
+            "than horizon_days"
+        )
+    return build_dataset_from_records(
+        records_from_synthetic(batch),
+        horizon_days=batch.horizon_days,
+        seed=batch.seed,
+        train_fraction=train_fraction,
+        validation_fraction=validation_fraction,
     )

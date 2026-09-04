@@ -7,7 +7,6 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from app.services import contact_timing
-from src.ml.config import MLSettings
 from src.ml.contact_timing.bandit import TimingBandit
 from src.ml.schemas import ModelMetadata
 from src.ml.versioning import utc_now
@@ -77,9 +76,10 @@ def test_record_reply_engagement_updates_and_persists(tmp_path, monkeypatch):
     monkeypatch.setenv("ML_ARTIFACTS_DIR", str(tmp_path))
 
     before = bandit.expected_rate("reliable_prompt_clean", "tue_midday")
-    assert contact_timing.record_reply_engagement(
-        segment="reliable_prompt_clean", arm="tue_midday"
-    ) is True
+    assert (
+        contact_timing.record_reply_engagement(segment="reliable_prompt_clean", arm="tue_midday")
+        is True
+    )
     assert bandit.expected_rate("reliable_prompt_clean", "tue_midday") > before
     assert (tmp_path / "contact-timing-bandit" / "test-v1" / "model.joblib").exists()
 
@@ -99,9 +99,7 @@ def test_record_reply_engagement_rejects_unknown_arm(monkeypatch):
 def test_record_reply_engagement_without_model_is_quiet(monkeypatch):
     monkeypatch.setattr(contact_timing, "load_bandit", lambda: None)
     assert (
-        contact_timing.record_reply_engagement(
-            segment="reliable_prompt_clean", arm="tue_midday"
-        )
+        contact_timing.record_reply_engagement(segment="reliable_prompt_clean", arm="tue_midday")
         is False
     )
 

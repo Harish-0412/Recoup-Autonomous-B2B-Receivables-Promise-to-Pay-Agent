@@ -40,6 +40,7 @@ import {
   triggerBatchRunDetailed,
   fetchLatestRun,
   fetchPastRuns,
+  runInvoiceCycle,
   TaskApiError,
   type RunSummary,
   type RunInvoiceDecision,
@@ -364,6 +365,63 @@ export default function RunsPage() {
   const [runError, setRunError] = useState<TaskApiError | null>(null);
   const [ackChecked, setAckChecked] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
+  const [rerunningInvoiceId, setRerunningInvoiceId] = useState<string | null>(null);
+  const [rerunFeedback, setRerunFeedback] = useState<{ id: string; msg: string; success: boolean } | null>(null);
+
+  const handleRerunInvoice = async (invoiceId: string) => {
+    setRerunningInvoiceId(invoiceId);
+    setRerunFeedback(null);
+    try {
+      const cycle = await runInvoiceCycle(invoiceId);
+      setResult((prev) => {
+        if (!prev || !prev.invoice_decisions) return prev;
+        const updated = prev.invoice_decisions.map((d) => {
+          if (d.invoice_id !== invoiceId) return d;
+          return {
+            ...d,
+            tier: cycle.tier,
+            p_recovery: cycle.p_recovery,
+            expected_value: cycle.expected_value,
+            rationale: cycle.rationale,
+            action_type: cycle.action_type,
+            ladder_step: cycle.ladder_step,
+            decision_allowed: cycle.decision ? cycle.decision.allowed : null,
+            decision_reason: cycle.decision ? cycle.decision.reason : cycle.reason,
+            violations: cycle.decision ? cycle.decision.violations : [],
+            state_before: cycle.state_before,
+            state_after: cycle.state_after,
+            transitioned: cycle.transitioned,
+            executed: !!cycle.execution?.delivered,
+            execution_status: cycle.execution ? (cycle.execution.delivered ? "DELIVERED" : cycle.execution.error ? "FAILED" : "PENDING") : null,
+            timing_arm: cycle.timing_arm,
+            timing_expected_rate: cycle.timing_expected_rate,
+            timing_scheduled_for: cycle.timing_scheduled_for,
+            drift_flagged: cycle.drift_flagged,
+            drift_score: cycle.drift_score,
+            drift_drivers: cycle.drift_drivers,
+            broken_promise_score: cycle.broken_promise_score,
+            broken_promise_status: cycle.broken_promise_status,
+            ml_workflow: cycle.ml_workflow,
+          };
+        });
+        return { ...prev, invoice_decisions: updated };
+      });
+      setExpandedInvoice(invoiceId);
+      setRerunFeedback({
+        id: invoiceId,
+        msg: `Decision cycle re-run completed: Tier ${cycle.tier} · P(recovery) ${(cycle.p_recovery * 100).toFixed(1)}%. ML workflow trace refreshed.`,
+        success: true,
+      });
+    } catch (err: any) {
+      setRerunFeedback({
+        id: invoiceId,
+        msg: `Re-run failed: ${err?.message || err}`,
+        success: false,
+      });
+    } finally {
+      setRerunningInvoiceId(null);
+    }
+  };
 
   // If a key survived in the tab session or default key exists, validate on load.
   useEffect(() => {
@@ -1164,6 +1222,20 @@ export default function RunsPage() {
                                       {dec.days_overdue}d overdue
                                     </div>
                                     <button
+                                      onClick={() => handleRerunInvoice(dec.invoice_id)}
+                                      disabled={rerunningInvoiceId === dec.invoice_id}
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-orange-500/10 hover:bg-orange-500/20 text-orange-600 dark:text-orange-400 border border-orange-500/20 transition-colors disabled:opacity-50"
+                                      title="Re-run autonomous decision cycle and ML validation for this invoice"
+                                    >
+                                      <RefreshCw
+                                        className={cn(
+                                          "w-3 h-3",
+                                          rerunningInvoiceId === dec.invoice_id && "animate-spin"
+                                        )}
+                                      />
+                                      <span>{rerunningInvoiceId === dec.invoice_id ? "Re-running..." : "Re-run Cycle"}</span>
+                                    </button>
+                                    <button
                                       onClick={() => setExpandedInvoice(isExpanded ? null : dec.invoice_id)}
                                       className="p-1 rounded-md text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
                                       title={isExpanded ? "Collapse details" : "Expand details"}
@@ -1282,6 +1354,23 @@ export default function RunsPage() {
                                 {/* Expanded detailed drawer */}
                                 {isExpanded && (
                                   <div className="p-4 border-t border-zinc-200/80 dark:border-white/10 bg-white/70 dark:bg-black/20 space-y-3 text-xs">
+                                    {rerunFeedback && rerunFeedback.id === dec.invoice_id && (
+                                      <div
+                                        className={cn(
+                                          "p-3 rounded-xl border flex items-center gap-2 font-mono text-xs",
+                                          rerunFeedback.success
+                                            ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-400"
+                                            : "bg-red-500/10 border-red-500/30 text-red-700 dark:text-red-400"
+                                        )}
+                                      >
+                                        {rerunFeedback.success ? (
+                                          <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-500" />
+                                        ) : (
+                                          <XCircle className="w-4 h-4 shrink-0 text-red-500" />
+                                        )}
+                                        <span>{rerunFeedback.msg}</span>
+                                      </div>
+                                    )}
                                     <div>
                                       <span className="font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider text-[10px]">
                                         ML Reasoning Rationale:

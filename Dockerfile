@@ -1,6 +1,8 @@
 # Multi-stage: full toolchain to build wheels, slim runtime to serve them.
 # Release runs `alembic upgrade head`; the web process runs Uvicorn.
-# The image never ships a .env -- secrets arrive as environment variables.
+# The image never ships a .env -- secrets are injected via env at boot, never
+# read from .env. Use Render Environment Groups / Doppler / AWS Secrets Manager
+# as the only three supported secret-injection paths.
 
 FROM python:3.11-slim AS builder
 WORKDIR /build

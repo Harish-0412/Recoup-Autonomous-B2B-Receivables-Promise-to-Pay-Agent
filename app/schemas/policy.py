@@ -17,6 +17,8 @@ from datetime import date
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.core.policy import LEGAL_MIN_CONTACT_GAP_DAYS
+
 
 class PolicyOverridesIn(BaseModel):
     """Proposed ceilings under test. All optional; unset means production value."""
@@ -25,7 +27,12 @@ class PolicyOverridesIn(BaseModel):
 
     discount_ceiling_pct: float | None = Field(default=None, ge=0.0, le=100.0)
     max_discount_amount: float | None = Field(default=None, ge=0.0)
-    min_contact_gap_days: int | None = Field(default=None, ge=0, le=30)
+    min_contact_gap_days: int | None = Field(
+        default=None,
+        ge=LEGAL_MIN_CONTACT_GAP_DAYS,
+        le=30,
+        description="Minimum gap between contacts. Statutory floor is 2 days.",
+    )
     max_contacts_per_invoice: int | None = Field(default=None, ge=0, le=20)
     min_days_overdue_to_contact: int | None = Field(default=None, ge=0, le=60)
     self_cure_probability: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -34,7 +41,7 @@ class PolicyOverridesIn(BaseModel):
 class ReplayWindowIn(BaseModel):
     """The decision-trace window to counterfactually replay."""
 
-    model_config = ConfigDict(protected_namespaces=())
+    model_config = ConfigDict(protected_namespaces=(), populate_by_name=True)
 
     from_date: date = Field(alias="from")
     to_date: date = Field(alias="to")

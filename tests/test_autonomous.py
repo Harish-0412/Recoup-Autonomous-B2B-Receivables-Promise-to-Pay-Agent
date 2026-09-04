@@ -57,16 +57,19 @@ def test_anything_else_is_refused(configured_key, header):
 def test_an_unconfigured_key_denies_rather_than_allows(monkeypatch):
     """A deploy that forgot to set the key must fail visibly, not run open."""
 
-    from app.core.config import get_settings
+    import app.core.config as cfg
 
-    get_settings.cache_clear()
     monkeypatch.setenv("TASK_API_KEY", "")
-    try:
-        with pytest.raises(HTTPException) as caught:
-            require_task_key("Bearer anything")
-        assert caught.value.status_code == 503
-    finally:
-        get_settings.cache_clear()
+    # _env_file=None is load-bearing: pydantic-settings lets a local .env
+    # win over an *empty* env var, so a developer's .env key would leak into
+    # this assertion and turn the expected 503 into a 401.
+    monkeypatch.setattr(
+        "app.core.security.get_settings",
+        lambda: cfg.Settings(_env_file=None, APP_ENV="development"),
+    )
+    with pytest.raises(HTTPException) as caught:
+        require_task_key("Bearer anything")
+    assert caught.value.status_code == 503
 
 
 # --- the lock ---------------------------------------------------------------
@@ -117,11 +120,11 @@ def sweep(monkeypatch):
     async def run(pairs, as_of):
         from app.services import repository
 
-        async def fake_pending(session, limit=500):
+        async def fake_pending(session, business_id, limit=500):
             return pairs
 
         monkeypatch.setattr(repository, "pending_promises", fake_pending)
-        return await sweep_promises(None, as_of=as_of)
+        return await sweep_promises(None, "default", as_of=as_of)
 
     return run
 

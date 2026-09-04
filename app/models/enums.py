@@ -111,3 +111,37 @@ class DecisionOutcome(str, Enum):
     SKIPPED = "skipped"
     EXECUTED = "executed"
     FAILED = "failed"
+
+
+class AllocationSource(str, Enum):
+    """Where a payment allocation originated.
+
+    ``razorpay_link`` and ``razorpay_payment`` are both Razorpay events but
+    represent different Razorpay event types (payment_link.paid vs
+    payment.captured). Keying by source+provider_ref makes it impossible for
+    both events to count the same money twice -- the unique constraint on
+    (business_id, source, provider_ref) rejects the duplicate at the DB level.
+
+    ``bank_utr`` is an operator-entered NEFT/RTGS/UPI transfer.
+    ``erp_credit_note`` is a negative amount from an ERP sync (Zoho/QBO credit
+    note that partially offsets what the customer owes).
+    """
+
+    RAZORPAY_LINK = "razorpay_link"
+    RAZORPAY_PAYMENT = "razorpay_payment"
+    BANK_UTR = "bank_utr"
+    ERP_CREDIT_NOTE = "erp_credit_note"
+
+
+class IntegrationProvider(str, Enum):
+    """ERP or accounting systems Recoup can pull invoices from.
+
+    Each provider has exactly one ``IntegrationCredential`` row per tenant.
+    Tally has no cloud API, so its "integration" is a file upload; it still
+    gets a provider value so import history is query-able.
+    """
+
+    ZOHO_BOOKS = "zoho_books"
+    QUICKBOOKS = "quickbooks"
+    RAZORPAY_INVOICES = "razorpay_invoices"
+    TALLY = "tally"

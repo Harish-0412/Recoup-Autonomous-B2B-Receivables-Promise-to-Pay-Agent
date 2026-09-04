@@ -176,6 +176,37 @@ class ModelBasedScorer:
         )
 
 
+#: Marker written into artifact ``notes`` by the trainer when the labels
+#: came from the allocation-settled warehouse ETL. Only an artifact carrying
+#: this marker may serve traffic -- a synthetic-trained model is CI evidence,
+#: not a production scorer.
+LIVE_LABEL_MARKER = "labels:live-webhooks"
+
+
+def live_recovery_artifact_available(
+    settings: MLSettings | None = None,
+) -> bool:
+    """Whether a live-webhooks recovery artifact exists, without unpickling it."""
+
+    import json
+
+    from src.ml.artifacts import LATEST_FILENAME
+    from src.ml.recovery.artifacts import MODEL_NAME
+
+    active_settings = settings or MLSettings()
+    try:
+        latest_path = active_settings.ml_artifacts_dir / MODEL_NAME / LATEST_FILENAME
+        if not latest_path.exists():
+            return False
+        version = latest_path.read_text(encoding="utf-8").strip()
+        meta_path = active_settings.ml_artifacts_dir / MODEL_NAME / version / "meta.json"
+        metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+        notes = metadata.get("notes") or ""
+        return LIVE_LABEL_MARKER in notes
+    except Exception:
+        return False
+
+
 def get_recovery_scorer(
     *,
     use_model: bool | None = None,
@@ -185,6 +216,11 @@ def get_recovery_scorer(
 
     ``use_model`` overrides the configured flag, which is what the tests and
     the batch demo use to force one path or the other.
+
+    Wave 6: the flag alone is not enough. A model serves traffic only when a
+    live-webhooks artifact exists -- i.e. xgb beat the rules on a real holdout
+    and the trainer saved it. Until then ``USE_MODEL_SCORER`` stays
+    effectively off and the rules decide, whatever the environment says.
     """
 
     active_settings = settings or MLSettings()
@@ -197,6 +233,10 @@ def get_recovery_scorer(
     if not scorer.is_available:
         # Nothing has been trained yet: say so by returning the rules directly
         # rather than a model scorer that degrades on every single invoice.
+        return RulesBasedScorer()
+    if not live_recovery_artifact_available(active_settings):
+        # A synthetic-trained artifact is CI evidence, not a production
+        # scorer. Stay on the rules until the live card exists.
         return RulesBasedScorer()
     return scorer
 

@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.core.security import require_api_key
+from app.core.tenancy import TenantContext, require_tenant
 from app.db.session import get_db
 from app.schemas.cash_forecast import CashForecastOut, WindowForecastOut
 from app.services import repository
@@ -138,6 +139,7 @@ async def cash_forecast(
     draws: int = Query(default=DEFAULT_DRAWS, ge=MIN_DRAWS, le=MAX_DRAWS),
     seed: int = Query(default=0),
     db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(require_tenant),
 ) -> CashForecastOut:
     """Forecasted cash landing in 7-day and 30-day windows, with intervals."""
 
@@ -150,8 +152,8 @@ async def cash_forecast(
     from src.ml.cash_forecast.simulate import ForecastInput, forecast_cash
     from src.ml.versioning import utc_now
 
-    invoices = await repository.list_open_invoices(db, limit=limit)
-    cases = [await repository.load_case(db, invoice) for invoice in invoices]
+    invoices = await repository.list_open_invoices(db, tenant.business_id, limit=limit)
+    cases = [await repository.load_case(db, invoice, tenant.business_id) for invoice in invoices]
     actionable = [case for case in cases if case.invoice.outstanding > 0]
 
     probs, scorer_version, fallbacks = score_book_probabilities(actionable)

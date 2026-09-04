@@ -1,6 +1,14 @@
 """Train, evaluate and save the recovery-probability model.
 
     python scripts/train_recovery_model.py --batch-size 6000 --seed 42
+    python scripts/train_recovery_model.py --source=warehouse
+
+Two label sources, one training path. ``synthetic`` (default) generates the
+seed-42 simulator book and is what CI runs -- deterministic, no database.
+``warehouse`` trains on real allocation-settled labels from
+``scripts/etl/real_outcomes.py`` and additionally gates shipment: the xgb
+challenger ships only if its real-holdout AUC meets or beats the rules-based
+incumbent, otherwise the run writes its report but saves no artifact.
 
 Trains three models on the same temporally split data -- a logistic baseline,
 gradient-boosted trees, and a small neural net -- calibrates each on the
@@ -42,9 +50,24 @@ from src.ml.recovery.models import (  # noqa: E402
     train_model,
 )
 
+LABEL_SOURCE_SYNTHETIC = "synthetic"
+LABEL_SOURCE_LIVE = "live-webhooks"
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--source",
+        choices=[LABEL_SOURCE_SYNTHETIC, "warehouse"],
+        default=LABEL_SOURCE_SYNTHETIC,
+        help="synthetic: seed-42 simulator book (CI). warehouse: real ETL labels.",
+    )
+    parser.add_argument(
+        "--warehouse-parquet",
+        type=Path,
+        default=None,
+        help="override for data/warehouse/recovery_outcomes.parquet",
+    )
     parser.add_argument("--batch-size", type=int, default=6000, help="number of invoices")
     parser.add_argument("--customers", type=int, default=900)
     parser.add_argument("--seed", type=int, default=42)
@@ -73,30 +96,46 @@ def main(argv: list[str] | None = None) -> int:
     calibration = None if args.calibration == "none" else args.calibration
 
     # --- data ---------------------------------------------------------------
-    batch = generate_batch(
-        batch_size=args.batch_size,
-        customer_count=args.customers,
-        seed=args.seed,
-        horizon_days=args.horizon_days,
-        as_of=args.as_of,
-        timeline_days=args.timeline_days,
-    )
-    dataset = build_dataset(batch)
-    summary = dataset.summary()
+    # One training path after this point: both sources arrive as temporally
+    # split LabeledRecords, so the split, models, calibration and card code
+    # cannot drift apart between synthetic and live runs.
+    from src.ml.recovery.dataset import build_dataset_from_records
 
-    print(f"generated {len(batch.invoices)} invoices, seed={args.seed}")
-    print(
-        f"  {len(batch.mature_invoices())} have a mature {args.horizon_days}-day label "
-        f"({len(batch.invoices) - len(batch.mature_invoices())} still inside the horizon "
-        "and therefore excluded)"
-    )
+    if args.source == "warehouse":
+        from src.ml.recovery.warehouse import DEFAULT_WAREHOUSE_PARQUET, load_warehouse_records
+
+        records = load_warehouse_records(args.warehouse_parquet or DEFAULT_WAREHOUSE_PARQUET)
+        dataset = build_dataset_from_records(
+            records, horizon_days=args.horizon_days, seed=args.seed
+        )
+        label_source = LABEL_SOURCE_LIVE
+        print(f"loaded {len(records)} mature live rows from the warehouse ETL")
+    else:
+        batch = generate_batch(
+            batch_size=args.batch_size,
+            customer_count=args.customers,
+            seed=args.seed,
+            horizon_days=args.horizon_days,
+            as_of=args.as_of,
+            timeline_days=args.timeline_days,
+        )
+        dataset = build_dataset(batch)
+        label_source = LABEL_SOURCE_SYNTHETIC
+        print(f"generated {len(batch.invoices)} invoices, seed={args.seed}")
+        print(
+            f"  {len(batch.mature_invoices())} have a mature {args.horizon_days}-day label "
+            f"({len(batch.invoices) - len(batch.mature_invoices())} still inside the horizon "
+            "and therefore excluded)"
+        )
+    summary = dataset.summary()
+    print(f"  label source: {label_source}")
     print(f"  features: {len(dataset.feature_columns)}")
     for name, info in summary["splits"].items():  # type: ignore[union-attr]
         print(
             f"  {name:<11} rows={info['rows']:<6} positive_rate={info['positive_rate']:.3f}  "
             f"{info['first_flag_date']} -> {info['last_flag_date']}"
         )
-    print("  split is by flag date, so no model sees an invoice flagged after its test set")
+    print("  split is by scored date, so no model sees an invoice scored after its test set")
 
     # --- train --------------------------------------------------------------
     specs = [
@@ -223,19 +262,42 @@ def main(argv: list[str] | None = None) -> int:
                 f"shap={driver.shap_contribution:+.4f}"
             )
 
+    # --- champion / challenger gate ----------------------------------------
+    # Synthetic runs ship the best test-AUC model, as before. Live runs ship
+    # xgb -- and only xgb -- when it meets or beats the rules incumbent on the
+    # real holdout; otherwise the report is written as evidence but no artifact
+    # is saved and USE_MODEL_SCORER keeps serving the rules.
+    ship_model = best.model_name
+    ship_blocked_reason: str | None = None
+    if label_source == LABEL_SOURCE_LIVE:
+        xgb_metrics = next(m for m in test_metrics if m.model_name == PRIMARY_NAME)
+        if primary_auc >= rules_metrics.roc_auc:
+            best = xgb_metrics
+            best_model = trained[PRIMARY_NAME]
+            ship_model = PRIMARY_NAME
+        else:
+            ship_model = "rules-based"
+            ship_blocked_reason = (
+                f"xgb test AUC {primary_auc:.3f} below rules "
+                f"{rules_metrics.roc_auc:.3f} on the live holdout; not shipping"
+            )
+            print(f"\n{ship_blocked_reason}")
+
     # --- persist ------------------------------------------------------------
     report = {
         "dataset": summary,
+        "label_source": label_source,
         "calibration": args.calibration,
         "threshold": args.threshold,
         "test": [json.loads(m.model_dump_json()) for m in [rules_metrics, *test_metrics]],
         "validation": [json.loads(m.model_dump_json()) for m in validation_metrics],
         "head_to_head": json.loads(comparison.model_dump_json()),
-        "selected_model": best.model_name,
+        "selected_model": ship_model,
+        "ship_blocked_reason": ship_blocked_reason,
         "global_importance": importance,
     }
 
-    if not args.no_save:
+    if not args.no_save and ship_blocked_reason is None:
         path, metadata = save_recovery_model(
             best_model,
             train_rows=len(dataset.train),
@@ -249,11 +311,14 @@ def main(argv: list[str] | None = None) -> int:
             },
             notes=(
                 f"{best.model_name}, {args.calibration} calibration on the validation split, "
-                f"temporal split at {dataset.train_end}/{dataset.validation_end}"
+                f"temporal split at {dataset.train_end}/{dataset.validation_end}, "
+                f"labels:{label_source}"
             ),
         )
         report["model_version"] = metadata.model_version
         print(f"\nsaved {metadata.model_version} to {path}")
+    elif ship_blocked_reason is not None:
+        print("\nno artifact saved (challenger did not beat the incumbent)")
 
     report_path = args.out / "evaluation_report.json"
     report_path.write_text(json.dumps(report, indent=2, default=str) + "\n", encoding="utf-8")
@@ -276,10 +341,13 @@ def main(argv: list[str] | None = None) -> int:
     ]
     card = {
         "model_version": report.get("model_version"),
-        "shipped_model": best.model_name,
+        "shipped_model": ship_model,
         "threshold": args.threshold,
         "calibration": args.calibration,
+        "label_source": label_source,
+        "source": label_source,
         "test_rows": best.rows,
+        "ship_blocked_reason": ship_blocked_reason,
         "results": [
             {
                 "model": m.model_name,
@@ -290,7 +358,7 @@ def main(argv: list[str] | None = None) -> int:
                 "f1": m.f1,
                 "brier": m.brier_score,
                 "ece": m.expected_calibration_error,
-                "shipped": m.model_name == best.model_name,
+                "shipped": m.model_name == ship_model,
             }
             for m in [rules_metrics, *test_metrics]
         ],
@@ -306,8 +374,7 @@ def main(argv: list[str] | None = None) -> int:
             "challenger_value_at_risk_at_k": comparison.challenger_value_at_risk_at_k,
             "incumbent_value_at_risk_at_k": comparison.incumbent_value_at_risk_at_k,
             "value_delta": round(
-                comparison.challenger_value_at_risk_at_k
-                - comparison.incumbent_value_at_risk_at_k,
+                comparison.challenger_value_at_risk_at_k - comparison.incumbent_value_at_risk_at_k,
                 2,
             ),
             "k": comparison.k,

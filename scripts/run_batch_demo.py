@@ -91,7 +91,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "rules-vs-model head-to-head comparison."
         ),
     )
-    parser.add_argument("--threshold", type=float, default=0.5, help="Decision threshold for ML metrics.")
+    parser.add_argument(
+        "--threshold", type=float, default=0.5, help="Decision threshold for ML metrics."
+    )
     parser.add_argument(
         "--write-report",
         type=Path,
@@ -678,8 +680,7 @@ def _render_markdown(
             )
         elif ece < 0.05:
             calibration_verdict = (
-                "well calibrated: safe to multiply straight through the "
-                "expected-value formula."
+                "well calibrated: safe to multiply straight through the " "expected-value formula."
             )
         elif ece < 0.08:
             calibration_verdict = (

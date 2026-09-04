@@ -39,6 +39,9 @@ function formatINRCompact(amount: number): string {
 }
 
 function sourceLabel(source: string): string {
+  if (source === "live-webhooks") return "live webhooks (allocation-settled)";
+  if (source === "synthetic") return "synthetic simulator book";
+  if (source === "synthetic-fallback") return "committed model-card numbers (fallback)";
   if (source === "model_card.json") return "fresh training artifact";
   if (source === "evaluation_report.json") return "training report";
   return "committed model-card numbers (no artifact on this clone)";

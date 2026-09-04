@@ -121,7 +121,7 @@ class TimingBandit:
         rows: list[tuple[str, str, int]],
         *,
         update_global: bool = True,
-    ) -> "TimingBandit":
+    ) -> TimingBandit:
         """Batch-train from (segment, arm, reward) rows. Returns self."""
 
         for segment, arm, reward in rows:

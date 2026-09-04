@@ -295,8 +295,9 @@ all observed in production logs.
   outcome independently of what the agent does, so the model predicts who *will*
   pay, not who pays *because* the agent acted. Measuring the latter needs a
   holdout arm this simulation does not have.
-- **No load testing.** `BATCH_MAX_INVOICES=200` is a sensible bound, not a
-  measured one.
+- **Load-tested on a dev box (Wave 6).** `BATCH_MAX_INVOICES=1920` is 80% of
+  the measured N ≈ 2400 wall-p95 cliff -- see `docs/load_test.md`. Re-run on
+  staging Postgres before quoting it as a production number.
 
 ---
 

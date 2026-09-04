@@ -1,0 +1,50 @@
+﻿# Vercel Build and Deployment Configuration
+# This file is read by Vercel during build and deployment
+
+# Root directory of the Next.js application
+[build]
+  command = "npm run build"
+  functions = "api/**/*.ts"
+  
+# Environment variables (reference, override in Vercel dashboard)
+[env]
+  # Public environment variables (visible in browser)
+  NEXT_PUBLIC_API_URL = "https://recoup-api.onrender.com/api/v1"
+  NEXT_PUBLIC_TASK_API_KEY = ""
+
+# Caching configuration
+[cache]
+  # Cache Next.js build output
+  "**/.next/cache/**" = { raw = true }
+  # Cache node_modules
+  "**/node_modules/**" = { raw = true }
+
+# Redirects and rewrites
+[[redirects]]
+  source = "/api/v1/(.*)"
+  destination = "https://recoup-api.onrender.com/api/v1/:1"
+  statusCode = 200
+
+# Security headers
+[[headers]]
+  source = "/(.*)"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    X-XSS-Protection = "1; mode=block"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "geolocation=(), microphone=(), camera=()"
+
+# CSP header for API calls
+[[headers]]
+  source = "/api/(.*)"
+  [headers.values]
+    Access-Control-Allow-Credentials = "true"
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "GET,OPTIONS,PATCH,DELETE,POST,PUT"
+    Access-Control-Allow-Headers = "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, X-Request-Id, Authorization, X-Recoup-Tenant"
+
+# Error page customization
+[errorPages]
+  404 = "/404.html"
+  500 = "/500.html"

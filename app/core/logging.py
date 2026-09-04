@@ -7,6 +7,27 @@ import structlog
 from app.core.config import get_settings
 
 
+def _add_opentelemetry_processor(_, __, event_dict: dict) -> dict:
+    """Add OpenTelemetry trace_id and span_id to log records."""
+    try:
+        from opentelemetry import trace
+
+        current_span = trace.get_current_span()
+        if current_span and current_span.is_recording():
+            ctx = current_span.get_span_context()
+            if ctx and ctx.is_valid:
+                event_dict["trace_id"] = format(ctx.trace_id, "032x")
+                event_dict["span_id"] = format(ctx.span_id, "016x")
+    except ImportError:
+        # OpenTelemetry not available, skip
+        pass
+    except Exception:  # noqa: BLE001
+        # Any error in trace extraction shouldn't break logging
+        pass
+
+    return event_dict
+
+
 def setup_logging() -> None:
     settings = get_settings()
 
@@ -22,6 +43,7 @@ def setup_logging() -> None:
         processors=[
             structlog.contextvars.merge_contextvars,
             structlog.processors.add_log_level,
+            _add_opentelemetry_processor,  # Add trace/span IDs
             structlog.processors.StackInfoRenderer(),
             structlog.dev.set_exc_info,
             structlog.processors.TimeStamper(fmt="iso", utc=True),

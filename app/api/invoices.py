@@ -14,6 +14,7 @@ from app.core.logging import get_logger
 from app.core.policy import policy_config_from_settings
 from app.core.ratelimit import rate_limit
 from app.core.security import require_api_key
+from app.core.tenancy import TenantContext, require_tenant
 from app.db.session import get_db
 from app.models import (
     Customer,
@@ -38,9 +39,8 @@ from app.schemas import (
     RunCycleResponse,
 )
 from app.services import contact_timing, repository
-from app.services.ml_workflow import build_ml_workflow_steps
-
 from app.services.executor import ExecutionIntent, build_execution_service
+from app.services.ml_workflow import build_ml_workflow_steps
 from src.ml.versioning import utc_now
 
 router = APIRouter(
@@ -58,31 +58,38 @@ logger = get_logger(__name__)
     dependencies=[Depends(rate_limit("ingest"))],
 )
 async def ingest_batch(
-    payload: BatchIngestRequest, db: AsyncSession = Depends(get_db)
+    payload: BatchIngestRequest,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(require_tenant),
 ) -> BatchIngestResponse:
-    """Ingest customers and invoices.
+    """Ingest customers and invoices into the caller's business.
 
     Idempotent by business key: re-posting the same batch skips what already
-    exists rather than failing or duplicating. Demos get re-run, and a demo
-    that only works on a clean database is a demo that will fail on stage.
+    exists rather than failing or duplicating. Keys are unique within a
+    business, so two tenants can both ingest INV-1042 without colliding.
     """
 
     response = BatchIngestResponse()
 
     for incoming in payload.customers:
-        if await repository.get_customer(db, incoming.customer_id) is not None:
+        if await repository.get_customer(db, incoming.customer_id, tenant.business_id) is not None:
             response.customers_skipped += 1
             continue
-        db.add(Customer(**incoming.model_dump()))
+        db.add(Customer(business_id=tenant.business_id, **incoming.model_dump()))
         response.customers_created += 1
     await db.flush()
 
     for incoming_invoice in payload.invoices:
-        if await repository.get_invoice(db, incoming_invoice.invoice_id) is not None:
+        if (
+            await repository.get_invoice(db, incoming_invoice.invoice_id, tenant.business_id)
+            is not None
+        ):
             response.invoices_skipped += 1
             continue
 
-        customer = await repository.get_customer(db, incoming_invoice.customer_id)
+        customer = await repository.get_customer(
+            db, incoming_invoice.customer_id, tenant.business_id
+        )
         if customer is None:
             # Reported rather than raised: one unmatched invoice should not
             # discard an otherwise valid batch of several hundred.
@@ -90,7 +97,7 @@ async def ingest_batch(
             continue
 
         fields = incoming_invoice.model_dump(exclude={"customer_id"})
-        db.add(Invoice(customer_pk=customer.id, **fields))
+        db.add(Invoice(business_id=tenant.business_id, customer_pk=customer.id, **fields))
         response.invoices_created += 1
 
     await db.commit()
@@ -126,6 +133,7 @@ async def list_invoices(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(require_tenant),
 ) -> InvoiceListResponse:
     """Paginated, filterable list of open invoices (the MSME work queue page).
 
@@ -148,6 +156,7 @@ async def list_invoices(
 
     rows, total = await repository.list_invoices_paginated(
         db,
+        tenant.business_id,
         status=actual_status,
         escalation_state=actual_escalation,
         customer_search=actual_q,
@@ -158,7 +167,7 @@ async def list_invoices(
         sort_desc=sort_desc,
     )
 
-    cases = [await repository.load_case(db, row) for row in rows]
+    cases = [await repository.load_case(db, row, tenant.business_id) for row in rows]
 
     items: list[InvoiceListItem] = []
     if cases:
@@ -174,10 +183,10 @@ async def list_invoices(
 
     for invoice in rows:
         customer = await db.get(Customer, invoice.customer_pk)
-        if customer is None:
+        if customer is None or customer.business_id != tenant.business_id:
             continue
 
-        open_promise = await repository.open_promise_for(db, invoice.id)
+        open_promise = await repository.open_promise_for(db, invoice.id, tenant.business_id)
 
         score = scored_by_id.get(invoice.invoice_id)
         item_tier = score.tier if score else None
@@ -247,20 +256,24 @@ async def list_invoices(
     )
 
 
-async def _load_invoice_or_404(db: AsyncSession, invoice_id: str) -> Invoice:
-    invoice = await repository.get_invoice(db, invoice_id)
+async def _load_invoice_or_404(db: AsyncSession, invoice_id: str, business_id: str) -> Invoice:
+    invoice = await repository.get_invoice(db, invoice_id, business_id)
     if invoice is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Invoice {invoice_id} not found")
     return invoice
 
 
 @router.get("/{invoice_id}", response_model=InvoiceOut)
-async def get_invoice(invoice_id: str, db: AsyncSession = Depends(get_db)) -> InvoiceOut:
+async def get_invoice(
+    invoice_id: str,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(require_tenant),
+) -> InvoiceOut:
     """One invoice's current state, including its promises."""
 
-    invoice = await _load_invoice_or_404(db, invoice_id)
+    invoice = await _load_invoice_or_404(db, invoice_id, tenant.business_id)
     customer = await db.get(Customer, invoice.customer_pk)
-    if customer is None:
+    if customer is None or customer.business_id != tenant.business_id:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Invoice has no customer")
 
     today = utc_now().date()
@@ -301,7 +314,11 @@ async def get_invoice(invoice_id: str, db: AsyncSession = Depends(get_db)) -> In
 
 
 @router.get("/{invoice_id}/audit", response_model=AuditTrailOut)
-async def get_audit_trail(invoice_id: str, db: AsyncSession = Depends(get_db)) -> AuditTrailOut:
+async def get_audit_trail(
+    invoice_id: str,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(require_tenant),
+) -> AuditTrailOut:
     """The full decision trail for one invoice.
 
     ``chain_verified`` re-derives each entry's hash from its stored content
@@ -309,8 +326,8 @@ async def get_audit_trail(invoice_id: str, db: AsyncSession = Depends(get_db)) -
     whether it has been tampered with is not an audit trail.
     """
 
-    await _load_invoice_or_404(db, invoice_id)
-    rows = await repository.trace_for_invoice(db, invoice_id)
+    await _load_invoice_or_404(db, invoice_id, tenant.business_id)
+    rows = await repository.trace_for_invoice(db, invoice_id, tenant.business_id)
 
     # Re-derive each entry's hash from its stored content and compare. Note
     # this checks *content integrity* per entry, not chain continuity: these
@@ -356,7 +373,11 @@ async def get_audit_trail(invoice_id: str, db: AsyncSession = Depends(get_db)) -
 
 
 @router.post("/{invoice_id}/run-cycle", response_model=RunCycleResponse)
-async def trigger_cycle(invoice_id: str, db: AsyncSession = Depends(get_db)) -> RunCycleResponse:
+async def trigger_cycle(
+    invoice_id: str,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(require_tenant),
+) -> RunCycleResponse:
     """Run one decision cycle over this invoice, and act on it.
 
     Everything the agent decided is returned, including the cases where it
@@ -373,8 +394,8 @@ async def trigger_cycle(invoice_id: str, db: AsyncSession = Depends(get_db)) -> 
     whether anything was really sent or only simulated under ``DRY_RUN``.
     """
 
-    invoice = await _load_invoice_or_404(db, invoice_id)
-    case = await repository.load_case(db, invoice)
+    invoice = await _load_invoice_or_404(db, invoice_id, tenant.business_id)
+    case = await repository.load_case(db, invoice, tenant.business_id)
 
     ledger = DecisionLedger()
     result = run_cycle(
@@ -388,12 +409,16 @@ async def trigger_cycle(invoice_id: str, db: AsyncSession = Depends(get_db)) -> 
 
     # ML Feature 2: Customer behavioral drift detection lookup
     customer_row = await db.get(Customer, invoice.customer_pk)
-    drift_flag = await repository.latest_drift_flag_for(db, customer_row.id) if customer_row else None
+    drift_flag = (
+        await repository.latest_drift_flag_for(db, customer_row.id, tenant.business_id)
+        if customer_row
+        else None
+    )
 
     # ML Feature 3: Broken-promise risk scoring
     bp_score: float | None = None
     bp_status: str | None = None
-    promise_row = await repository.open_promise_for(db, invoice.id)
+    promise_row = await repository.open_promise_for(db, invoice.id, tenant.business_id)
     if promise_row is not None:
         bp_status = promise_row.status.value
         if promise_row.broken_promise_score is not None:
@@ -401,23 +426,26 @@ async def trigger_cycle(invoice_id: str, db: AsyncSession = Depends(get_db)) -> 
         else:
             try:
                 from src.agent.promise_handler import score_broken_promise
-                bp_score = score_broken_promise({
-                    "customer": {
-                        "customer_id": case.customer.customer_id,
-                        "name": case.customer.name,
-                    },
-                    "invoice": {
-                        "invoice_id": invoice.invoice_id,
-                        "amount": invoice.amount,
-                        "days_overdue": invoice.days_overdue,
-                    },
-                    "promised_amount": promise_row.promised_amount,
-                    "promised_date": (
-                        promise_row.promised_date.isoformat()
-                        if hasattr(promise_row.promised_date, "isoformat")
-                        else str(promise_row.promised_date)
-                    ),
-                })
+
+                bp_score = score_broken_promise(
+                    {
+                        "customer": {
+                            "customer_id": case.customer.customer_id,
+                            "name": case.customer.name,
+                        },
+                        "invoice": {
+                            "invoice_id": invoice.invoice_id,
+                            "amount": invoice.amount,
+                            "days_overdue": invoice.days_overdue,
+                        },
+                        "promised_amount": promise_row.promised_amount,
+                        "promised_date": (
+                            promise_row.promised_date.isoformat()
+                            if hasattr(promise_row.promised_date, "isoformat")
+                            else str(promise_row.promised_date)
+                        ),
+                    }
+                )
                 promise_row.broken_promise_score = bp_score
             except Exception:
                 bp_score = 0.50
@@ -480,7 +508,7 @@ async def trigger_cycle(invoice_id: str, db: AsyncSession = Depends(get_db)) -> 
         invoice.escalation_state = result.state_after
         invoice.ladder_index += 1
 
-    await repository.persist_ledger(db, ledger)
+    await repository.persist_ledger(db, ledger, tenant.business_id)
     await db.commit()
 
     decision = None
@@ -545,14 +573,16 @@ async def trigger_cycle(invoice_id: str, db: AsyncSession = Depends(get_db)) -> 
         ),
         timing_arm=None if timing.fallback_used else timing.arm,
         timing_expected_rate=timing.expected_response_rate,
-        timing_scheduled_for=timing.scheduled_for.isoformat() if hasattr(timing.scheduled_for, "isoformat") else str(timing.scheduled_for),
+        timing_scheduled_for=timing.scheduled_for.isoformat()
+        if hasattr(timing.scheduled_for, "isoformat")
+        else str(timing.scheduled_for),
         timing_fallback=timing.fallback_used,
         drift_flagged=drift_flag.flagged if drift_flag else False,
-        drift_score=float(getattr(drift_flag, "anomaly_score", getattr(drift_flag, "score", 0.12))) if drift_flag else 0.12,
+        drift_score=float(getattr(drift_flag, "anomaly_score", getattr(drift_flag, "score", 0.12)))
+        if drift_flag
+        else 0.12,
         drift_drivers=((drift_flag.details or {}).get("top_drivers", []) if drift_flag else []),
         broken_promise_score=bp_score,
         broken_promise_status=bp_status,
         ml_workflow=ml_steps_raw,
     )
-
-

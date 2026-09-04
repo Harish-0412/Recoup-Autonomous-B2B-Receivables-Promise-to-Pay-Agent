@@ -2,12 +2,12 @@
 
 import pandas as pd
 
+from src.data.synthetic_generator import CustomerArchetype
 from src.ml.contact_timing.dataset import (
     build_engagement_log,
     training_frame,
     true_response_rate,
 )
-from src.data.synthetic_generator import CustomerArchetype
 from src.ml.contact_timing.segments import ARMS
 
 
@@ -46,13 +46,11 @@ def test_training_frame_cannot_reach_the_archetype():
 
 
 def test_response_model_prefers_documented_slots():
-    assert (
-        true_response_rate(CustomerArchetype.RELIABLE, "mon_morning")
-        > true_response_rate(CustomerArchetype.RELIABLE, "fri_late")
+    assert true_response_rate(CustomerArchetype.RELIABLE, "mon_morning") > true_response_rate(
+        CustomerArchetype.RELIABLE, "fri_late"
     )
-    assert (
-        true_response_rate(CustomerArchetype.ERRATIC, "thu_late")
-        > true_response_rate(CustomerArchetype.ERRATIC, "mon_morning")
+    assert true_response_rate(CustomerArchetype.ERRATIC, "thu_late") > true_response_rate(
+        CustomerArchetype.ERRATIC, "mon_morning"
     )
     for arm in ARMS:
         rate = true_response_rate(CustomerArchetype.NEW_UNKNOWN, arm)

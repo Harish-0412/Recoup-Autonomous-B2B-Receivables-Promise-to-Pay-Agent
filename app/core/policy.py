@@ -58,6 +58,11 @@ DEFAULT_ESCALATION_LADDER: tuple[str, ...] = (
     "human_handoff",
 )
 
+#: The absolute statutory legal floor under Indian debt collection guidance
+#: (RBI Fair Practices Code & state money lending harassment prohibitions).
+#: The policy engine and simulation will refuse any contact gap below this floor.
+LEGAL_MIN_CONTACT_GAP_DAYS: int = 2
+
 
 class ActionType(str, Enum):
     """What the agent is proposing to do."""
@@ -94,7 +99,8 @@ class PolicyConfig(BaseModel):
     max_discount_amount: float | None = Field(default=None, ge=0.0)
 
     #: Minimum days between two contacts about the same invoice.
-    min_contact_gap_days: int = Field(default=3, ge=0)
+    #: Legal floor is 2 days; changing below the 3-day default requires legal re-review.
+    min_contact_gap_days: int = Field(default=3, ge=LEGAL_MIN_CONTACT_GAP_DAYS)
     #: Total messages the agent may send about one invoice, ever.
     max_contacts_per_invoice: int = Field(default=4, ge=0)
     #: Do not contact until an invoice is at least this far overdue.

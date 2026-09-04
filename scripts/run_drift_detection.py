@@ -45,6 +45,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit", type=int, default=500)
     parser.add_argument("--window-days", type=int, default=None)
     parser.add_argument("--as-of", type=date.fromisoformat, default=None)
+    parser.add_argument(
+        "--business-id",
+        type=str,
+        default=None,
+        help="Score one business. Default scores every business in the registry.",
+    )
     return parser
 
 
@@ -74,7 +80,9 @@ def render_alert(
     return subject, "\n".join(lines)
 
 
-async def run(*, limit: int, window_days: int, as_of: date) -> dict[str, int]:
+async def run(
+    *, limit: int, window_days: int, as_of: date, business_id: str | None = None
+) -> dict[str, int]:
     settings = get_settings()
     scorer = DriftScorer()
     summary = {
@@ -88,67 +96,88 @@ async def run(*, limit: int, window_days: int, as_of: date) -> dict[str, int]:
         summary["fallback"] = 1
         return summary
 
+    async with async_session_maker() as session:
+        from sqlalchemy import select as sa_select
+
+        from app.models import Business as BusinessModel
+
+        if business_id:
+            tenants = [business_id]
+        else:
+            try:
+                rows = await session.execute(sa_select(BusinessModel.business_id))
+                tenants = [r for (r,) in rows.all()] or [settings.BUSINESS_ID or "default"]
+            except Exception:
+                tenants = [settings.BUSINESS_ID or "default"]
+
     flagged: list[tuple[str, str, float, list[tuple[str, float]]]] = []
     async with async_session_maker() as session:
-        customers = await repository.customers_with_open_invoices(session, limit=limit)
-        for customer in customers:
-            invoices = await repository.invoices_for_customer(session, customer.id)
-            facts = [
-                InvoiceFacts(
-                    amount=invoice.amount,
-                    amount_paid=invoice.amount_paid,
-                    issue_date=invoice.issue_date,
-                    due_date=invoice.due_date,
-                    paid_at=invoice.paid_at,
-                )
-                for invoice in invoices
-            ]
-            lifetime_scale = max(customer.avg_invoice_amount, 0.0) * max(customer.invoice_count, 1)
-            series = customer_series(
-                facts,
-                lifetime_scale=lifetime_scale,
-                as_of=as_of,
-                window_days=window_days,
-            )
-            feature_values = to_row(from_period_series(series))
-            result = scorer.score_series(customer.customer_id, series)
-            assert result.anomaly_score is not None and result.threshold is not None
-            await repository.save_drift_flag(
-                session,
-                CustomerDriftFlag(
-                    customer_pk=customer.id,
-                    anomaly_score=result.anomaly_score,
-                    threshold=result.threshold,
-                    flagged=result.flagged,
-                    model_version=result.model_version,
-                    window_days=window_days,
-                    details={
-                        "features": {
-                            column: float(value)
-                            for column, value in zip(FEATURE_COLUMNS, feature_values, strict=True)
-                        },
-                        "top_drivers": [
-                            {
-                                "feature": driver.feature,
-                                "value": driver.value,
-                                "deviation": driver.deviation,
-                            }
-                            for driver in result.top_drivers
-                        ],
-                    },
-                ),
-            )
-            summary["scored"] += 1
-            if result.flagged:
-                summary["flagged"] += 1
-                flagged.append(
-                    (
-                        customer.customer_id,
-                        customer.name,
-                        result.anomaly_score,
-                        [(d.feature, d.deviation) for d in result.top_drivers],
+        for tenant in tenants:
+            customers = await repository.customers_with_open_invoices(session, tenant, limit=limit)
+            for customer in customers:
+                invoices = await repository.invoices_for_customer(session, customer.id, tenant)
+                facts = [
+                    InvoiceFacts(
+                        amount=invoice.amount,
+                        amount_paid=invoice.amount_paid,
+                        issue_date=invoice.issue_date,
+                        due_date=invoice.due_date,
+                        paid_at=invoice.paid_at,
                     )
+                    for invoice in invoices
+                ]
+                lifetime_scale = max(customer.avg_invoice_amount, 0.0) * max(
+                    customer.invoice_count, 1
                 )
+                series = customer_series(
+                    facts,
+                    lifetime_scale=lifetime_scale,
+                    as_of=as_of,
+                    window_days=window_days,
+                )
+                feature_values = to_row(from_period_series(series))
+                result = scorer.score_series(customer.customer_id, series)
+                assert result.anomaly_score is not None and result.threshold is not None
+                await repository.save_drift_flag(
+                    session,
+                    CustomerDriftFlag(
+                        business_id=tenant,
+                        customer_pk=customer.id,
+                        anomaly_score=result.anomaly_score,
+                        threshold=result.threshold,
+                        flagged=result.flagged,
+                        model_version=result.model_version,
+                        window_days=window_days,
+                        details={
+                            "features": {
+                                column: float(value)
+                                for column, value in zip(
+                                    FEATURE_COLUMNS, feature_values, strict=True
+                                )
+                            },
+                            "top_drivers": [
+                                {
+                                    "feature": driver.feature,
+                                    "value": driver.value,
+                                    "deviation": driver.deviation,
+                                }
+                                for driver in result.top_drivers
+                            ],
+                        },
+                    ),
+                    tenant,
+                )
+                summary["scored"] += 1
+                if result.flagged:
+                    summary["flagged"] += 1
+                    flagged.append(
+                        (
+                            customer.customer_id,
+                            customer.name,
+                            result.anomaly_score,
+                            [(d.feature, d.deviation) for d in result.top_drivers],
+                        )
+                    )
         await session.commit()
 
     subject, body = render_alert(
@@ -189,6 +218,7 @@ def main(argv: list[str] | None = None) -> int:
             limit=args.limit,
             window_days=args.window_days or settings.DRIFT_WINDOW_DAYS,
             as_of=args.as_of or utc_now().date(),
+            business_id=args.business_id,
         )
     )
     print(f"scored={summary['scored']} flagged={summary['flagged']}")

@@ -130,7 +130,9 @@ def verify_drift_detector() -> dict[str, Any]:
     injected_recall = card.get("injected_drift", {}).get("recall", 0.0)
 
     print(f"Drift Model Version: {model_version}")
-    print(f"Flagged vs Unflagged Default Lift: {lift:.2f}x ({flagged_def_rate:.1%} vs {unflagged_def_rate:.1%})")
+    print(
+        f"Flagged vs Unflagged Default Lift: {lift:.2f}x ({flagged_def_rate:.1%} vs {unflagged_def_rate:.1%})"
+    )
     print(f"Injected Synthetic Drift Recall: {injected_recall:.1%}")
 
     assert lift > 2.0, f"Drift lift {lift} is below 2.0x threshold"
@@ -186,9 +188,13 @@ def verify_cash_forecast() -> dict[str, Any]:
     w30 = next((w for w in windows if w["window_days"] == 30), None)
 
     if w7:
-        print(f"7-Day Expected Cash Recovery:  Rs. {w7['mean']:,.2f} (5th-95th percentile: Rs. {w7['p5']:,.2f} - Rs. {w7['p95']:,.2f})")
+        print(
+            f"7-Day Expected Cash Recovery:  Rs. {w7['mean']:,.2f} (5th-95th percentile: Rs. {w7['p5']:,.2f} - Rs. {w7['p95']:,.2f})"
+        )
     if w30:
-        print(f"30-Day Expected Cash Recovery: Rs. {w30['mean']:,.2f} (5th-95th percentile: Rs. {w30['p5']:,.2f} - Rs. {w30['p95']:,.2f})")
+        print(
+            f"30-Day Expected Cash Recovery: Rs. {w30['mean']:,.2f} (5th-95th percentile: Rs. {w30['p5']:,.2f} - Rs. {w30['p95']:,.2f})"
+        )
 
     r_card = httpx.get(f"{BASE_URL}/api/v1/forecast/cash/card", headers=OPERATOR_HEADERS)
     card = r_card.json()

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import csv
 import math
-from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -74,11 +73,46 @@ def generate_mock_promise_dataset(
     rng = np.random.default_rng(seed)
 
     archetypes = [
-        {"name": "RELIABLE", "weight": 0.35, "base_keep_rate": 0.94, "mean_days_late": 2.0, "mean_on_time": 0.93, "disp_rate": 0.02},
-        {"name": "LATE_BUT_PAYS", "weight": 0.28, "base_keep_rate": 0.82, "mean_days_late": 16.0, "mean_on_time": 0.35, "disp_rate": 0.06},
-        {"name": "ERRATIC", "weight": 0.18, "base_keep_rate": 0.45, "mean_days_late": 26.0, "mean_on_time": 0.46, "disp_rate": 0.15},
-        {"name": "NEW_UNKNOWN", "weight": 0.10, "base_keep_rate": 0.64, "mean_days_late": 9.0, "mean_on_time": 0.60, "disp_rate": 0.07},
-        {"name": "RISK_ESCALATING", "weight": 0.09, "base_keep_rate": 0.50, "mean_days_late": 15.0, "mean_on_time": 0.40, "disp_rate": 0.12},
+        {
+            "name": "RELIABLE",
+            "weight": 0.35,
+            "base_keep_rate": 0.94,
+            "mean_days_late": 2.0,
+            "mean_on_time": 0.93,
+            "disp_rate": 0.02,
+        },
+        {
+            "name": "LATE_BUT_PAYS",
+            "weight": 0.28,
+            "base_keep_rate": 0.82,
+            "mean_days_late": 16.0,
+            "mean_on_time": 0.35,
+            "disp_rate": 0.06,
+        },
+        {
+            "name": "ERRATIC",
+            "weight": 0.18,
+            "base_keep_rate": 0.45,
+            "mean_days_late": 26.0,
+            "mean_on_time": 0.46,
+            "disp_rate": 0.15,
+        },
+        {
+            "name": "NEW_UNKNOWN",
+            "weight": 0.10,
+            "base_keep_rate": 0.64,
+            "mean_days_late": 9.0,
+            "mean_on_time": 0.60,
+            "disp_rate": 0.07,
+        },
+        {
+            "name": "RISK_ESCALATING",
+            "weight": 0.09,
+            "base_keep_rate": 0.50,
+            "mean_days_late": 15.0,
+            "mean_on_time": 0.40,
+            "disp_rate": 0.12,
+        },
     ]
 
     weights = [a["weight"] for a in archetypes]
@@ -101,16 +135,23 @@ def generate_mock_promise_dataset(
 
         avg_days_late = max(0.0, rng.normal(arch["mean_days_late"], 4.0))
         expected_prior_promises = max(0, int(invoice_count * 0.35))
-        prior_broken_count = int(rng.poisson(expected_prior_promises * (1.0 - arch["base_keep_rate"])))
+        prior_broken_count = int(
+            rng.poisson(expected_prior_promises * (1.0 - arch["base_keep_rate"]))
+        )
         broken_rate = min(1.0, prior_broken_count / max(expected_prior_promises, 1))
 
         dispute_rate = _clamp(rng.normal(arch["disp_rate"], 0.03), 0.0, 1.0)
 
-        days_overdue = int(rng.choice([
-            rng.integers(1, 15),
-            rng.integers(15, 45),
-            rng.integers(45, 120),
-        ], p=[0.55, 0.30, 0.15]))
+        days_overdue = int(
+            rng.choice(
+                [
+                    rng.integers(1, 15),
+                    rng.integers(15, 45),
+                    rng.integers(45, 120),
+                ],
+                p=[0.55, 0.30, 0.15],
+            )
+        )
 
         payment_terms = int(rng.choice([15, 30, 45, 60], p=[0.15, 0.60, 0.15, 0.10]))
         days_since_contact = int(rng.integers(1, 25))
@@ -120,7 +161,11 @@ def generate_mock_promise_dataset(
         # Promise features
         # Some customers promise partial amounts, some full
         promise_amount_ratio = float(rng.choice([1.0, 0.5, 0.25, 0.8], p=[0.7, 0.15, 0.08, 0.07]))
-        promise_horizon_days = int(rng.choice([2, 3, 5, 7, 10, 14, 21, 30], p=[0.20, 0.25, 0.20, 0.15, 0.08, 0.06, 0.04, 0.02]))
+        promise_horizon_days = int(
+            rng.choice(
+                [2, 3, 5, 7, 10, 14, 21, 30], p=[0.20, 0.25, 0.20, 0.15, 0.08, 0.06, 0.04, 0.02]
+            )
+        )
 
         recency_score = recency_weighted_on_time_score(on_time_90d, on_time_all, invoice_count)
 
@@ -188,7 +233,9 @@ def run(output_path: Path = OUTPUT_CSV, n_samples: int = 15000) -> None:
 
     broken_count = sum(r["is_broken"] for r in rows)
     print(f"ETL completed: wrote {len(rows)} rows to {output_path}")
-    print(f"Broken promises: {broken_count} ({broken_count / len(rows):.1%}), Honored: {len(rows) - broken_count}")
+    print(
+        f"Broken promises: {broken_count} ({broken_count / len(rows):.1%}), Honored: {len(rows) - broken_count}"
+    )
 
 
 if __name__ == "__main__":

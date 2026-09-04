@@ -1,4 +1,4 @@
-﻿from functools import lru_cache
+from functools import lru_cache
 from typing import Literal
 
 from pydantic import Field, model_validator
@@ -148,8 +148,8 @@ class Settings(BaseSettings):
     )
     DEFAULT_MIN_CONTACT_GAP_DAYS: int = Field(
         default=3,
-        description="Minimum days between contacts for same invoice",
-        ge=1,
+        description="Minimum days between contacts for same invoice (statutory floor: 2)",
+        ge=2,
     )
     DEFAULT_ESCALATION_LADDER: str = Field(
         default='["reminder_1", "reminder_2", "final_notice", "human_handoff"]',
@@ -409,4 +409,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

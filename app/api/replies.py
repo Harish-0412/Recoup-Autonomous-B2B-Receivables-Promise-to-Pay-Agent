@@ -46,6 +46,7 @@ from app.core.logging import get_logger
 from app.core.promise_tracker import PromiseRecord, extract_promise
 from app.core.ratelimit import limited_429_response
 from app.core.security import require_api_key
+from app.core.tenancy import TenantContext, require_tenant
 from app.db.session import get_db
 from app.models import (
     Customer,
@@ -55,6 +56,7 @@ from app.models import (
     ReplyDisposition,
     WebhookEvent,
 )
+from app.models.tables import DEFAULT_BUSINESS_ID
 from app.schemas.models import (
     ClassifyPreviewEntities,
     ClassifyPreviewIn,
@@ -112,6 +114,36 @@ def _body_text(message: dict[str, Any]) -> str:
     return ""
 
 
+async def _quarantine_business(db: AsyncSession, from_email: str) -> str:
+    """Tenant owning an unroutable reply: sender's unique tenant, else default.
+
+    This is the single audited cross-tenant read in the reply path, and it
+    only decides which review queue quarantines the mail. Nothing is
+    auto-acted upon without a scoped invoice.
+    """
+
+    if not from_email or "@" not in from_email:
+        return DEFAULT_BUSINESS_ID
+    from sqlalchemy import func as sa_func
+    from sqlalchemy import select as sa_select
+
+    from app.models import Customer as CustomerModel
+
+    try:
+        rows = await db.execute(
+            sa_select(CustomerModel.business_id).where(
+                sa_func.lower(CustomerModel.email) == from_email.strip().lower()
+            )
+        )
+        owners = {row for (row,) in rows.all()}
+    except Exception:
+        return DEFAULT_BUSINESS_ID
+    if len(owners) == 1:
+        only = next(iter(owners))
+        return only or DEFAULT_BUSINESS_ID
+    return DEFAULT_BUSINESS_ID
+
+
 @router.post("", status_code=status.HTTP_200_OK)
 async def receive_reply(
     request: Request,
@@ -123,8 +155,16 @@ async def receive_reply(
 ) -> JSONResponse:
     """Receive one inbound customer reply from Cloudflare Worker or Resend."""
 
+    # Outer surface before signature verification. Verified inbound mail must
+    # still store on a Redis outage (200 + in-process cap), so this wall fails
+    # *open* -- forgery protection is the Svix signature check that follows,
+    # and an unverified payload is never stored. (Ingest/API scopes are the
+    # opposite: fail-closed, see app/core/ratelimit.py.)
     throttled = await limited_429_response(
-        request, get_settings().RATE_LIMIT_PER_MINUTE, "reply-webhook"
+        request,
+        get_settings().RATE_LIMIT_PER_MINUTE,
+        "reply-webhook",
+        fail_mode="open_after_sig",
     )
     if throttled is not None:
         return throttled
@@ -155,6 +195,17 @@ async def receive_reply(
             content={"status": "rejected", "reason": "invalid_signature"},
         )
 
+    # Signature passed: verified events fail-open on Redis outage (store + 200)
+    # so Resend's retries don't infinitely repeat a real customer's promise.
+    throttled_verified = await limited_429_response(
+        request,
+        get_settings().RATE_LIMIT_PER_MINUTE * 2,
+        f"{DEFAULT_BUSINESS_ID}:resend-webhook-verified",
+        fail_mode="open_after_sig",
+    )
+    if throttled_verified is not None:
+        return throttled_verified
+
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError:
@@ -173,7 +224,7 @@ async def receive_reply(
 
     existing = await repository.get_inbound_reply(db, reply_id)
     if existing is not None:
-        logger.info("Duplicate reply ignored", reply_id=reply_id)
+        logger.info("Duplicate reply ignored", reply_id=reply_id, business_id=existing.business_id)
         return JSONResponse(
             content={
                 "status": "duplicate",
@@ -182,10 +233,45 @@ async def receive_reply(
             }
         )
 
+    from_email = str(message.get("from") or "")
+    body = _body_text(message)
+    recipients = _recipients(message)
+
+    # The tagged address carries the tenant: a valid address from A never
+    # resolves into B, even if the invoice ids collide. A forged business tag
+    # fails its HMAC and lands in quarantine below.
+    routed = resolve_from_recipients(recipients, secret=active_settings.REPLY_ADDRESS_SECRET)
+    routed_business: str | None = routed[0] if routed else None
+    invoice_id: str | None = routed[1] if routed else None
+
+    invoice: Invoice | None = (
+        await repository.get_invoice(db, invoice_id, routed_business)
+        if invoice_id and routed_business
+        else None
+    )
+    customer: Customer | None = None
+    if invoice is not None:
+        candidate = await db.get(Customer, invoice.customer_pk)
+        if candidate is not None and candidate.business_id == invoice.business_id:
+            customer = candidate
+    if customer is None and routed_business is not None:
+        customer = await repository.get_customer_by_email(db, from_email, routed_business)
+
+    # Quarantine: unroutable mail (no valid tag) is stored under the tenant of
+    # its sender when the sender matches exactly one tenant, else 'default'.
+    # It is NEVER auto-acted upon -- _process requires a scoped invoice before
+    # recording any promise or opt-out -- it just waits in that tenant's
+    # review queue for a human.
+    quarantine_business = routed_business
+    if quarantine_business is None:
+        quarantine_business = await _quarantine_business(db, from_email)
+    assert quarantine_business is not None
+
     # Mirrored into webhook_events for the same reason Razorpay's are: one
     # place to answer "did this delivery reach us, and what did we do".
     db.add(
         WebhookEvent(
+            business_id=quarantine_business,
             event_id=f"resend:{reply_id}",
             event_type="email.inbound",
             payload=payload,
@@ -193,19 +279,8 @@ async def receive_reply(
         )
     )
 
-    from_email = str(message.get("from") or "")
-    body = _body_text(message)
-    recipients = _recipients(message)
-
-    invoice_id = resolve_from_recipients(recipients, secret=active_settings.REPLY_ADDRESS_SECRET)
-    invoice: Invoice | None = await repository.get_invoice(db, invoice_id) if invoice_id else None
-    customer: Customer | None = None
-    if invoice is not None:
-        customer = await db.get(Customer, invoice.customer_pk)
-    if customer is None:
-        customer = await repository.get_customer_by_email(db, from_email)
-
     reply = InboundReply(
+        business_id=quarantine_business,
         reply_id=reply_id,
         invoice_pk=invoice.id if invoice else None,
         customer_pk=customer.id if customer else None,
@@ -217,9 +292,9 @@ async def receive_reply(
     db.add(reply)
 
     ledger = DecisionLedger()
-    outcome = await _process(db, reply, invoice, customer, body, ledger)
+    outcome = await _process(db, reply, invoice, customer, body, ledger, quarantine_business)
 
-    await repository.persist_ledger(db, ledger)
+    await repository.persist_ledger(db, ledger, quarantine_business)
     await db.commit()
 
     return JSONResponse(content=outcome.model_dump())
@@ -232,6 +307,7 @@ async def _process(
     customer: Customer | None,
     body: str,
     ledger: DecisionLedger,
+    business_id: str,
 ) -> ReplyIngestResponse:
     """Classify one reply and act on it. Never raises."""
 
@@ -250,6 +326,7 @@ async def _process(
             await repository.record_opt_out(
                 db,
                 customer,
+                business_id,
                 reason="Customer asked to stop receiving reminders.",
                 source_reply_id=reply.reply_id,
                 honour_days=settings.DEFAULT_OPTOUT_DAYS,
@@ -333,7 +410,7 @@ async def _process(
     # to favour the slot that provoked it.
     if prediction.intent not in _OPT_OUT_INTENTS and customer is not None:
         try:
-            last_contact = await repository.last_timed_contact(db, invoice.id)
+            last_contact = await repository.last_timed_contact(db, invoice.id, business_id)
             if last_contact is not None and last_contact.timing_arm:
                 timing_service.record_reply_engagement(
                     segment=timing_service.segment_for_snapshot(customer),
@@ -346,6 +423,7 @@ async def _process(
         await repository.record_opt_out(
             db,
             customer,
+            business_id,
             reason="Classifier read this reply as an unsubscribe request.",
             source_reply_id=reply.reply_id,
             honour_days=settings.DEFAULT_OPTOUT_DAYS,
@@ -395,7 +473,7 @@ async def _process(
     extracted = extract_promise(prediction, invoice_amount=outstanding, ledger=ledger)
 
     if isinstance(extracted, PromiseRecord):
-        row = await repository.record_promise(db, invoice, extracted)
+        row = await repository.record_promise(db, invoice, extracted, business_id, ledger)
         reply.promise_pk = row.id
         reply.disposition = ReplyDisposition.AUTO_HANDLED
         reply.disposition_reason = (
@@ -502,15 +580,21 @@ async def classify_preview(payload: ClassifyPreviewIn) -> ClassifyPreviewOut:
 
 
 @router.get("/review", response_model=ReplyReviewQueue, dependencies=[Depends(require_api_key)])
-@router.get("/review-queue", response_model=ReplyReviewQueue, dependencies=[Depends(require_api_key)])
-async def review_queue(limit: int = 50, db: AsyncSession = Depends(get_db)) -> ReplyReviewQueue:
-    """Replies waiting on a person, oldest first.
+@router.get(
+    "/review-queue", response_model=ReplyReviewQueue, dependencies=[Depends(require_api_key)]
+)
+async def review_queue(
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(require_tenant),
+) -> ReplyReviewQueue:
+    """Replies waiting on a person, oldest first, one tenant.
 
     This endpoint is what makes "routed to a human" a real destination rather
     than a phrase in a docstring.
     """
 
-    rows = await repository.replies_needing_review(db, limit=limit)
+    rows = await repository.replies_needing_review(db, tenant.business_id, limit=limit)
     return ReplyReviewQueue(
         count=len(rows),
         items=[
@@ -535,10 +619,14 @@ async def review_queue(limit: int = 50, db: AsyncSession = Depends(get_db)) -> R
     status_code=status.HTTP_200_OK,
     dependencies=[Depends(require_api_key)],
 )
-async def mark_reviewed(reply_id: str, db: AsyncSession = Depends(get_db)) -> JSONResponse:
+async def mark_reviewed(
+    reply_id: str,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(require_tenant),
+) -> JSONResponse:
     """Take one reply off the queue once a person has dealt with it."""
 
-    reply = await repository.get_inbound_reply(db, reply_id)
+    reply = await repository.get_inbound_reply(db, reply_id, tenant.business_id)
     if reply is None:
         return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,

@@ -34,9 +34,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from sqlalchemy import select  # noqa: E402
-from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 
-from app.db.session import async_session_maker, engine  # noqa: E402
+from app.db.session import async_session_maker  # noqa: E402
 from app.models.tables import Customer  # noqa: E402
 
 

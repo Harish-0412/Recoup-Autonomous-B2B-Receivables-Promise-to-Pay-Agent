@@ -47,14 +47,22 @@ async def test_simulate_without_a_key_is_refused(async_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_simulate_valid_body_gets_honest_501(async_client: AsyncClient, auth_headers: dict):
+async def test_simulate_valid_body_returns_200_with_simulation(
+    async_client: AsyncClient, auth_headers: dict
+):
     response = await async_client.post(
         "/api/v1/policy/simulate", json=_body(), headers=auth_headers
     )
-    assert response.status_code == 501
-    detail = response.json()["detail"]
-    assert detail["status"] == "not_implemented"
-    assert "architecture.md" in detail["reason"]
+    assert response.status_code == 200
+    data = response.json()
+    assert "baseline" in data
+    assert "simulated" in data
+    assert "delta" in data
+    assert "cases_affected" in data
+    assert data["cases_replayed"] > 0
+    assert data["baseline"]["recovery_rate"] >= 0.0
+    assert data["simulated"]["recovery_rate"] >= 0.0
+    assert "engine_version" in data
 
 
 @pytest.mark.asyncio

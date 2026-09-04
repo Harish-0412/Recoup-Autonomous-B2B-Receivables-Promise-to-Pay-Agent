@@ -51,6 +51,7 @@ def get_onnx_session() -> Any:
             # If not yet trained, return None so fallback can be used
             return None
         import onnxruntime as ort
+
         # Configure session with single thread for minimal latency in async loop
         opts = ort.SessionOptions()
         opts.intra_op_num_threads = 1
@@ -71,7 +72,9 @@ def recency_weighted_on_time_score(
     return float(recent_weight * on_time_ratio_90d + (1.0 - recent_weight) * on_time_ratio_all_time)
 
 
-def build_broken_promise_features(payload: dict[str, Any], as_of: date | None = None) -> list[float]:
+def build_broken_promise_features(
+    payload: dict[str, Any], as_of: date | None = None
+) -> list[float]:
     """Extract and validate the 19 features required by the ONNX predictor.
 
     Accepts raw dictionaries, nested customer/invoice records, or flat feature sets.
@@ -105,7 +108,9 @@ def build_broken_promise_features(payload: dict[str, Any], as_of: date | None = 
     else:
         recency_score = float(recency_score)
 
-    broken_promises_count = _get("customer_broken_promises_count", _get("prior_broken_promises_count", 0.0))
+    broken_promises_count = _get(
+        "customer_broken_promises_count", _get("prior_broken_promises_count", 0.0)
+    )
     broken_promise_rate = _get("customer_broken_promise_rate", _get("broken_promise_rate", -1.0))
     if broken_promise_rate < 0:
         broken_promise_rate = broken_promises_count / max(inv_count * 0.35, 1.0)
@@ -119,7 +124,9 @@ def build_broken_promise_features(payload: dict[str, Any], as_of: date | None = 
     invoice_amount = _get("invoice_amount", _get("amount", 50000.0))
     invoice_amount_log = _get("invoice_amount_log", math.log1p(max(invoice_amount, 0.0)))
     avg_customer_amount = _get("avg_invoice_amount", max(invoice_amount, 1.0))
-    ratio = _get("invoice_amount_vs_customer_avg_ratio", invoice_amount / max(avg_customer_amount, 1.0))
+    ratio = _get(
+        "invoice_amount_vs_customer_avg_ratio", invoice_amount / max(avg_customer_amount, 1.0)
+    )
     ratio = min(max(ratio, 0.0), 50.0)
 
     # Days overdue

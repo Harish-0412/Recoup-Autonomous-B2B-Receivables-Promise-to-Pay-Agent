@@ -62,12 +62,13 @@ def stubbed_app(monkeypatch):
     async def _no_db():
         yield None
 
-    async def _invoices(session, limit=500):
+    async def _invoices(session, business_id, limit=500):
         return [SimpleNamespace(invoice_id=f"INV-{i}") for i in range(5)]
 
-    async def _case_row(session, invoice):
+    async def _case_row(session, invoice, business_id):
         return _case(invoice_id=invoice.invoice_id)
 
+    from app.core.tenancy import TenantContext, require_tenant
     from app.services import repository
 
     cash_forecast.clear_forecast_cache()
@@ -81,6 +82,7 @@ def stubbed_app(monkeypatch):
     )
     app.dependency_overrides[get_db] = _no_db
     app.dependency_overrides[require_api_key] = lambda: None
+    app.dependency_overrides[require_tenant] = lambda: TenantContext(business_id="default")
     cash_forecast.clear_forecast_cache()
     yield app
     app.dependency_overrides.clear()

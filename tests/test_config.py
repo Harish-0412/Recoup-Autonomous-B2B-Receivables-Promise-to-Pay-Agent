@@ -28,6 +28,10 @@ MANAGED = (
     "DEBUG",
     "CORS_ORIGINS",
     "DATABASE_URL",
+    "TASK_API_KEY",
+    "API_KEY",
+    "GROQ_API_KEY",
+    "GEMINI_API_KEY",
     "RAZORPAY_KEY_ID",
     "RAZORPAY_KEY_SECRET",
     "RAZORPAY_WEBHOOK_SECRET",
@@ -43,6 +47,10 @@ MANAGED = (
 REAL_PRODUCTION = {
     "APP_ENV": "production",
     "DATABASE_URL": "postgresql://recoup:s3cret@db.neon.tech/recoup",
+    # The cron bearer token must be a real, set value in production.
+    "TASK_API_KEY": "a-real-cron-bearer-token",
+    # Reply understanding needs at least one LLM key; Groq here.
+    "GROQ_API_KEY": "gsk_live_value",
     "RAZORPAY_KEY_ID": "rzp_live_9f2a",
     "RAZORPAY_KEY_SECRET": "live-secret-value",
     "RAZORPAY_WEBHOOK_SECRET": "whsec_live_value",
@@ -173,6 +181,47 @@ def test_development_is_not_subject_to_the_production_guard(build):
     """Placeholders are exactly what local development should be allowed."""
 
     assert build(APP_ENV="development").is_production is False
+
+
+# --- production guard: TASK_API_KEY + LLM path (Wave 3) ---------------------
+
+
+@pytest.mark.parametrize(
+    "task_key",
+    [
+        "",  # unset
+        "change-me",  # never meant to survive
+        "my-change-me-key",  # substring form
+        "TASK_API_KEY",  # literal field name used as the value
+    ],
+)
+def test_production_refuses_a_placeholder_task_api_key(build, task_key):
+    """The cron bearer token guards an endpoint that sends real mail."""
+
+    with pytest.raises(ValidationError) as caught:
+        build(**{**REAL_PRODUCTION, "TASK_API_KEY": task_key})
+
+    assert "TASK_API_KEY" in str(caught.value)
+
+
+def test_production_refuses_to_boot_with_no_llm_path_at_all(build):
+    """Neither Groq nor Gemini configured means replies cannot be understood."""
+
+    env = {k: v for k, v in REAL_PRODUCTION.items() if k != "GROQ_API_KEY"}
+    with pytest.raises(ValidationError) as caught:
+        build(**env)
+
+    assert "LLM" in str(caught.value)
+
+
+def test_production_boots_when_gemini_alone_is_configured(build):
+    """Either LLM key satisfies the guard."""
+
+    settings = build(
+        **{k: v for k, v in REAL_PRODUCTION.items() if k != "GROQ_API_KEY"},
+        GEMINI_API_KEY="ai_live_value",
+    )
+    assert settings.is_production is True
 
 
 # --- driver normalisation ---------------------------------------------------

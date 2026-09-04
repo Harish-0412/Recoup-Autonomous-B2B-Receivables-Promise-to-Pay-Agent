@@ -28,7 +28,7 @@ async def test_recovery_card_returns_four_model_rows(async_client: AsyncClient):
     shipped = [row for row in data["results"] if row["shipped"]]
     assert len(shipped) == 1
     assert shipped[0]["model"] == data["shipped_model"]
-    if data["source"] == "model_card_fallback":
+    if data["source"] in {"synthetic-fallback", "synthetic"}:
         assert data["shipped_model"] == "xgb-recovery"
 
 
@@ -48,7 +48,7 @@ async def test_recovery_card_head_to_head_is_internally_consistent(async_client:
         )
         < 1.0
     )
-    if data["source"] == "model_card_fallback":
+    if data["source"] in {"synthetic-fallback", "synthetic"}:
         # About Rs 24.6L more at-risk value in the top 20% (seed 42).
         assert h2h["challenger"] == "xgb-recovery"
         assert h2h["auc_delta"] > 0
@@ -68,7 +68,7 @@ async def test_recovery_card_carries_calibration_and_importance(async_client: As
         assert abs(b["gap"] - (b["predicted"] - b["observed"])) < 0.002
 
     assert len(data["global_importance"]) == 10
-    if data["source"] == "model_card_fallback":
+    if data["source"] in {"synthetic-fallback", "synthetic"}:
         assert data["global_importance"][0]["feature"] == "customer_broken_promise_rate"
 
 
@@ -77,7 +77,13 @@ async def test_recovery_card_states_source_and_limitations(async_client: AsyncCl
     response = await async_client.get("/api/v1/models/recovery/card")
     data = response.json()
 
-    assert data["source"] in {"model_card.json", "evaluation_report.json", "model_card_fallback"}
+    assert data["source"] in {
+        "live-webhooks",
+        "synthetic",
+        "model_card.json",
+        "evaluation_report.json",
+        "synthetic-fallback",
+    }
     assert isinstance(data["use_model_scorer"], bool)
     assert len(data["limitations"]) >= 4
     assert any("synthetic" in line.lower() for line in data["limitations"])

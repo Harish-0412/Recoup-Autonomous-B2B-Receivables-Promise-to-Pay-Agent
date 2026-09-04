@@ -105,8 +105,9 @@ def approved(
 class FakeInvoiceRow:
     """Stands in for the ORM row the executor mutates and records against."""
 
-    def __init__(self) -> None:
+    def __init__(self, business_id: str = "default") -> None:
         self.id = 1
+        self.business_id = business_id
         self.payment_link_id: str | None = None
         self.payment_link_url: str | None = None
         self.prior_reminders_sent = 0
@@ -129,8 +130,9 @@ def session(monkeypatch):
     captured: dict = {}
     recording = RecordingSession()
 
-    async def fake_record_contact(session_arg, invoice, **kwargs):
+    async def fake_record_contact(session_arg, invoice, business_id="default", **kwargs):
         captured.update(kwargs)
+        captured["business_id"] = business_id
         from app.models.tables import ContactLog
 
         contact = ContactLog(invoice_pk=invoice.id, **kwargs)
@@ -593,8 +595,12 @@ async def test_every_message_carries_a_tagged_reply_to(session):
     await service_with(email=email).execute(session, intent, FakeInvoiceRow())
 
     reply_to = email.sent[-1]["reply_to"]
-    assert reply_to.startswith(f"reply+{case.invoice.invoice_id}.")
+    assert reply_to.startswith(f"reply+default.{case.invoice.invoice_id}.")
 
-    from app.services.reply_routing import resolve_invoice_id
+    from app.services.reply_routing import resolve_invoice_id, resolve_tenant_invoice
 
     assert resolve_invoice_id(reply_to, secret="test-address-secret") == case.invoice.invoice_id
+    assert resolve_tenant_invoice(reply_to, secret="test-address-secret") == (
+        "default",
+        case.invoice.invoice_id,
+    )

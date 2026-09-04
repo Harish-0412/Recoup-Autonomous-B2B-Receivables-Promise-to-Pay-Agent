@@ -35,16 +35,18 @@ def stubbed_app(monkeypatch):
     async def _no_db():
         yield None
 
-    async def _customer_row(session, customer_id: str):
+    async def _customer_row(session, customer_id: str, business_id: str = "default"):
         if customer_id == "C-MISSING":
             return None
         return _customer(customer_id=customer_id)
 
+    from app.core.tenancy import TenantContext, require_tenant
     from app.services import repository
 
     monkeypatch.setattr(repository, "get_customer", _customer_row)
     app.dependency_overrides[get_db] = _no_db
     app.dependency_overrides[require_api_key] = lambda: None
+    app.dependency_overrides[require_tenant] = lambda: TenantContext(business_id="default")
     contact_timing.clear_timing_cache()
     yield app
     app.dependency_overrides.clear()
@@ -67,13 +69,9 @@ async def test_next_time_unknown_customer_404(async_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_next_time_falls_back_without_artifact(
-    async_client: AsyncClient, monkeypatch
-):
+async def test_next_time_falls_back_without_artifact(async_client: AsyncClient, monkeypatch):
     monkeypatch.setattr(contact_timing, "load_bandit", lambda: None)
-    response = await async_client.get(
-        "/api/v1/schedule/next_time", params={"customer_id": "C-1"}
-    )
+    response = await async_client.get("/api/v1/schedule/next_time", params={"customer_id": "C-1"})
     assert response.status_code == 200
     data = response.json()
     assert data["customer_id"] == "C-1"
@@ -83,16 +81,12 @@ async def test_next_time_falls_back_without_artifact(
 
 
 @pytest.mark.asyncio
-async def test_next_time_serves_bandit_suggestion(
-    async_client: AsyncClient, monkeypatch
-):
+async def test_next_time_serves_bandit_suggestion(async_client: AsyncClient, monkeypatch):
     bandit = TimingBandit()
     bandit.fit_rows([("reliable_prompt_clean", "tue_midday", 1)] * 20)
     monkeypatch.setattr(contact_timing, "load_bandit", lambda: (bandit, None))
 
-    response = await async_client.get(
-        "/api/v1/schedule/next_time", params={"customer_id": "C-1"}
-    )
+    response = await async_client.get("/api/v1/schedule/next_time", params={"customer_id": "C-1"})
     assert response.status_code == 200
     data = response.json()
     assert data["fallback_used"] is False

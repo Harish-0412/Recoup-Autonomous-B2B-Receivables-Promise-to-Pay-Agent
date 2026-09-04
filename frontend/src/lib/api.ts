@@ -1909,3 +1909,228 @@ export async function fetchTimingCard(): Promise<TimingCard | null> {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Wave 2: Payments, Allocations & ERP Integrations
+// ---------------------------------------------------------------------------
+
+export interface BankPaymentIn {
+  utr: string;
+  amount: number;
+  currency?: string;
+  paid_on: string; // YYYY-MM-DD
+  payer_account?: string | null;
+  suggested_invoice_id?: string | null;
+  notes?: string;
+}
+
+export interface BankPaymentOut {
+  allocation_id: number;
+  utr: string;
+  amount: number;
+  currency: string;
+  paid_on: string;
+  payer_account: string | null;
+  notes: string;
+  recorded_by: string;
+  created_at: string;
+  match_confidence: 'duplicate' | 'probable' | 'ambiguous' | 'no_match';
+  match_reason: string;
+  suggested_invoice_id: string | null;
+}
+
+export interface UnmatchedPaymentOut {
+  allocation_id: number;
+  utr: string;
+  amount: number;
+  currency: string;
+  paid_on: string;
+  payer_account: string | null;
+  notes: string;
+  created_at: string;
+}
+
+export interface UnmatchedPaymentsResponse {
+  items: UnmatchedPaymentOut[];
+  total: number;
+}
+
+export interface AllocateIn {
+  invoice_id: string;
+}
+
+export interface AllocateOut {
+  allocation_id: number;
+  invoice_id: string;
+  new_amount_paid: number;
+  new_outstanding: number;
+  invoice_status: string;
+  currency: string;
+}
+
+export interface OAuthConnectIn {
+  code: string;
+  redirect_uri: string;
+  extras?: Record<string, unknown>;
+}
+
+export interface OAuthConnectOut {
+  provider: string;
+  connected: boolean;
+  scope: string;
+  expires_at: string | null;
+  message: string;
+}
+
+export interface SyncResponse {
+  provider: string;
+  customers_created: number;
+  customers_updated: number;
+  invoices_created: number;
+  invoices_updated: number;
+  invoices_skipped: number;
+  credit_notes_applied?: number;
+  errors: string[];
+  synced_at: string;
+}
+
+export interface IntegrationStatusOut {
+  provider: string;
+  connected: boolean;
+  last_sync_at: string | null;
+  last_sync_invoices: number;
+  last_sync_errors: number;
+  token_expires_at: string | null;
+}
+
+export interface TallyImportResponse {
+  filename: string;
+  format: string;
+  customers_created: number;
+  customers_updated: number;
+  invoices_created: number;
+  invoices_updated: number;
+  invoices_skipped: number;
+  errors: string[];
+  imported_at: string;
+}
+
+export interface ErpSyncAllResponse {
+  status: string;
+  business_id?: string;
+  reason?: string;
+  providers?: Record<string, { invoices_created?: number; invoices_updated?: number; errors?: string[]; error?: string }>;
+  synced_at?: string;
+}
+
+/** Submit a bank transfer (NEFT/RTGS/UPI) with UTR for automated matching */
+export async function postBankPayment(payload: BankPaymentIn): Promise<BankPaymentOut> {
+  const res = await fetch(`${API_BASE}/payments/bank`, {
+    method: 'POST',
+    headers: operatorHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Failed to submit bank payment' }));
+    throw new Error(err.detail || `Server returned ${res.status}`);
+  }
+  return res.json() as Promise<BankPaymentOut>;
+}
+
+/** Fetch queue of bank payments awaiting operator invoice confirmation */
+export async function fetchUnmatchedPayments(limit: number = 50): Promise<UnmatchedPaymentsResponse> {
+  const res = await fetch(`${API_BASE}/payments/unmatched?limit=${encodeURIComponent(String(limit))}`, {
+    method: 'GET',
+    headers: operatorHeaders(),
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch unmatched payments: ${res.status}`);
+  }
+  return res.json() as Promise<UnmatchedPaymentsResponse>;
+}
+
+/** Confirm allocation of an unmatched bank payment to a specific invoice */
+export async function confirmAllocation(allocationId: number, invoiceId: string): Promise<AllocateOut> {
+  const res = await fetch(`${API_BASE}/payments/${encodeURIComponent(String(allocationId))}/allocate`, {
+    method: 'POST',
+    headers: operatorHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ invoice_id: invoiceId }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Failed to allocate payment' }));
+    throw new Error(err.detail || `Server returned ${res.status}`);
+  }
+  return res.json() as Promise<AllocateOut>;
+}
+
+/** Get connection and sync status for an ERP integration */
+export async function fetchIntegrationStatus(provider: 'zoho' | 'quickbooks' | 'razorpay' | 'tally'): Promise<IntegrationStatusOut> {
+  const res = await fetch(`${API_BASE}/integrations/${encodeURIComponent(provider)}/status`, {
+    method: 'GET',
+    headers: operatorHeaders(),
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch ${provider} status: ${res.status}`);
+  }
+  return res.json() as Promise<IntegrationStatusOut>;
+}
+
+/** Connect an OAuth ERP provider with an authorization code */
+export async function connectIntegration(provider: 'zoho' | 'quickbooks', payload: OAuthConnectIn): Promise<OAuthConnectOut> {
+  const res = await fetch(`${API_BASE}/integrations/${encodeURIComponent(provider)}/connect`, {
+    method: 'POST',
+    headers: operatorHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `Failed to connect ${provider}` }));
+    throw new Error(err.detail || `Server returned ${res.status}`);
+  }
+  return res.json() as Promise<OAuthConnectOut>;
+}
+
+/** Trigger an immediate sync for a specific ERP provider */
+export async function syncIntegration(provider: 'zoho' | 'quickbooks' | 'razorpay'): Promise<SyncResponse> {
+  const res = await fetch(`${API_BASE}/integrations/${encodeURIComponent(provider)}/sync`, {
+    method: 'POST',
+    headers: operatorHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `Failed to sync ${provider}` }));
+    throw new Error(err.detail || `Server returned ${res.status}`);
+  }
+  return res.json() as Promise<SyncResponse>;
+}
+
+/** Upload and import a TallyPrime CSV or XML export file */
+export async function importTallyFile(file: File): Promise<TallyImportResponse> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const res = await fetch(`${API_BASE}/integrations/tally/import`, {
+    method: 'POST',
+    headers: operatorHeaders(), // Content-Type omitted so browser sets multipart boundary
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Failed to import Tally file' }));
+    throw new Error(err.detail || `Server returned ${res.status}`);
+  }
+  return res.json() as Promise<TallyImportResponse>;
+}
+
+/** Trigger autonomous scheduler sync across all connected ERPs */
+export async function triggerSyncErp(): Promise<ErpSyncAllResponse> {
+  const res = await fetch(`${API_BASE}/tasks/sync-erp`, {
+    method: 'POST',
+    headers: operatorHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Failed to trigger ERP sync' }));
+    throw new Error(err.detail || `Server returned ${res.status}`);
+  }
+  return res.json() as Promise<ErpSyncAllResponse>;
+}
+
+

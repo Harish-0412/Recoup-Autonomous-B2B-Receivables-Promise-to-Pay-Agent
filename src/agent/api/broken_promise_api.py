@@ -53,7 +53,9 @@ class BrokenPromiseScoreRequest(BaseModel):
 
 
 class BrokenPromiseScoreResponse(BaseModel):
-    risk_score: float = Field(ge=0.0, le=1.0, description="Probability of broken promise (0 = kept, 1 = broken)")
+    risk_score: float = Field(
+        ge=0.0, le=1.0, description="Probability of broken promise (0 = kept, 1 = broken)"
+    )
     risk_tier: str = Field(description="'LOW' (0-0.33), 'MEDIUM' (0.33-0.66), or 'HIGH' (>0.66)")
     recommendation: str
     model_version: str = "v1.0.0"
@@ -64,9 +66,15 @@ def get_risk_tier(score: float) -> tuple[str, str]:
     if score < 0.33:
         return "LOW", "High confidence commitment. Hold escalation; wait for promised payment date."
     elif score < 0.66:
-        return "MEDIUM", "Moderate risk of slip. Schedule standard polite reminder on promised date."
+        return (
+            "MEDIUM",
+            "Moderate risk of slip. Schedule standard polite reminder on promised date.",
+        )
     else:
-        return "HIGH", "High probability of broken promise. Prepare automated ladder escalation if unpaid within 24h."
+        return (
+            "HIGH",
+            "High probability of broken promise. Prepare automated ladder escalation if unpaid within 24h.",
+        )
 
 
 @router.post(

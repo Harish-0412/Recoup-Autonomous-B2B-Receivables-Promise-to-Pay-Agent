@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from src.ml.contact_timing.bandit import TimingBandit
-from src.ml.contact_timing.segments import ARMS, GLOBAL_SEGMENT
+from src.ml.contact_timing.segments import ARMS
 
 
 def test_cold_start_backs_off_to_global():

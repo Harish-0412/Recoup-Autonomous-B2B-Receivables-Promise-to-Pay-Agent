@@ -73,9 +73,12 @@ class ShapImportanceOut(BaseModel):
 class RecoveryCardOut(BaseModel):
     """The recovery model card as JSON.
 
-    ``source`` says where the numbers came from: a freshly written
-    ``model_card.json`` artifact, the full ``evaluation_report.json``, or the
-    committed fallback transcribed from ``docs/recovery_model_card.md``.
+    ``source`` says where the numbers came from: ``live-webhooks`` for a card
+    trained on allocation-settled warehouse labels, ``synthetic`` for a card
+    trained on the seed-42 simulator book, ``evaluation_report.json`` for a
+    full training report, ``model_card.json`` for a pre-Wave-6 card artifact,
+    or ``synthetic-fallback`` for the committed fallback transcribed from
+    ``docs/recovery_model_card.md``.
     """
 
     model_config = ConfigDict(protected_namespaces=())

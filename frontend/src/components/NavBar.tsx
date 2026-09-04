@@ -8,6 +8,7 @@ import { ArrowLeft, ShieldAlert } from 'lucide-react';
 const navLinks = [
   { href: '/dashboard', label: 'Command Center' },
   { href: '/queue', label: 'Queue' },
+  { href: '/payments', label: 'Payments & ERP' },
   { href: '/inbox', label: 'Inbox' },
   { href: '/policy', label: 'Policy' },
   { href: '/reports/batch', label: 'Batch Audit' },

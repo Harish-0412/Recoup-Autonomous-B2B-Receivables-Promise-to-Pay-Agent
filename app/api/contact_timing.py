@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.core.security import require_api_key
+from app.core.tenancy import TenantContext, require_tenant
 from app.db.session import get_db
 from app.schemas.contact_timing import NextTimeOut
 from app.services import contact_timing, repository
@@ -22,14 +23,18 @@ logger = get_logger(__name__)
 
 
 @router.get("/next_time", response_model=NextTimeOut)
-async def next_time(customer_id: str, db: AsyncSession = Depends(get_db)) -> NextTimeOut:
+async def next_time(
+    customer_id: str,
+    db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(require_tenant),
+) -> NextTimeOut:
     """The optimal datetime for the next reminder to this customer.
 
     404 on an unknown customer: guessing a slot for a customer that does not
     exist would be a stranger's reminder schedule, not a recommendation.
     """
 
-    customer = await repository.get_customer(db, customer_id)
+    customer = await repository.get_customer(db, customer_id, tenant.business_id)
     if customer is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Customer {customer_id} not found")
 

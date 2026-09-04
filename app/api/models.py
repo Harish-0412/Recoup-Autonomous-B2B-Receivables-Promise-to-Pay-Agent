@@ -179,16 +179,24 @@ def _read_json(path: Path) -> dict | None:
 
 
 def _card_from_model_card_json(payload: dict) -> RecoveryCardOut | None:
-    """Parse the small artifact written by scripts/train_recovery_model.py."""
+    """Parse the small artifact written by scripts/train_recovery_model.py.
+
+    ``source`` is the trainer-recorded label provenance: ``live-webhooks`` for
+    allocation-settled warehouse labels, ``synthetic`` for the seed-42
+    simulator book. Cards written before Wave 6 carry no key and keep the
+    legacy ``model_card.json`` value.
+    """
 
     try:
+        raw_source = str(payload.get("source") or payload.get("label_source") or "")
+        source = "live-webhooks" if raw_source == "live-webhooks" else "synthetic-fallback"
         return RecoveryCardOut(
             model_version=payload.get("model_version"),
             shipped_model=payload.get("shipped_model", SHIPPED_MODEL),
             threshold=float(payload.get("threshold", 0.5)),
             calibration=str(payload.get("calibration", "isotonic")),
             test_rows=int(payload.get("test_rows", 856)),
-            source="model_card.json",
+            source=source,
             results=[RecoveryModelRow(**row) for row in payload.get("results", [])],
             calibration_bins=[CalibrationBinOut(**b) for b in payload.get("calibration_bins", [])],
             head_to_head=(
@@ -268,13 +276,18 @@ def _card_from_evaluation_report(payload: dict) -> RecoveryCardOut | None:
             )
             for name, value in pairs
         ][:10]
+        source = (
+            "live-webhooks"
+            if payload.get("label_source") == "live-webhooks"
+            else "evaluation_report.json"
+        )
         return RecoveryCardOut(
             model_version=payload.get("model_version"),
             shipped_model=shipped,
             threshold=float(payload.get("threshold", 0.5)),
             calibration=str(payload.get("calibration", "isotonic")),
             test_rows=int(shipped_row["rows"]) if shipped_row else 856,
-            source="evaluation_report.json",
+            source=source,
             results=results,
             calibration_bins=bins,
             head_to_head=head_to_head,
@@ -289,7 +302,7 @@ def _fallback_card() -> RecoveryCardOut:
     return RecoveryCardOut(
         shipped_model=SHIPPED_MODEL,
         test_rows=856,
-        source="model_card_fallback",
+        source="synthetic-fallback",
         results=[RecoveryModelRow(**row) for row in _FALLBACK_RESULTS],
         calibration_bins=[CalibrationBinOut(**b) for b in _FALLBACK_BINS],
         head_to_head=HeadToHeadOut(**_FALLBACK_HEAD_TO_HEAD),
@@ -320,7 +333,16 @@ async def recovery_card() -> RecoveryCardOut:
     artifact_version = _artifact_model_version()
     if artifact_version:
         card = card.model_copy(update={"model_version": artifact_version})
-    card = card.model_copy(update={"use_model_scorer": MLSettings().use_model_scorer})
+
+    # Wave 6: USE_MODEL_SCORER stays off until the live card exists.
+    from src.ml.recovery.scorer import live_recovery_artifact_available
+
+    live_card_exists = (card.source == "live-webhooks") and live_recovery_artifact_available()
+    card = card.model_copy(
+        update={
+            "use_model_scorer": MLSettings().use_model_scorer if live_card_exists else False,
+        }
+    )
     if not card.limitations:
         card = card.model_copy(update={"limitations": list(_FALLBACK_LIMITATIONS)})
     return card

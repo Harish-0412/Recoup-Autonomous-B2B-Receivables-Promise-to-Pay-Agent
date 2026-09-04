@@ -9,7 +9,7 @@ production inference, and writes a comprehensive model_card.json.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import lightgbm as lgb
@@ -60,12 +60,25 @@ FEATURE_COLUMNS = [
 ]
 
 
-def train_and_export() -> dict:
+def train_and_export(data_path: Path | None = None) -> dict:
+    """Train on the mock CSV by default (CI); pass the live ETL CSV for real labels.
+
+    Live labels come from ``scripts/etl/real_broken_promise_outcomes.py``
+    (``data/broken_promise_live.csv``): KEPT/BROKEN verdicts the promise
+    tracker settled against allocation money, never the mock generator.
+    """
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
+    DATA_PATH = data_path or globals()["DATA_PATH"]
     if not DATA_PATH.exists():
+        if data_path is not None:
+            raise FileNotFoundError(
+                f"Live dataset not found at {DATA_PATH}. "
+                "Run scripts/etl/real_broken_promise_outcomes.py first."
+            )
         print(f"Dataset not found at {DATA_PATH}. Running ETL first...")
         from scripts.etl.broken_promise_etl import run as run_etl
+
         run_etl()
 
     print(f"Loading training data from {DATA_PATH}...")
@@ -80,7 +93,9 @@ def train_and_export() -> dict:
     )
 
     print(f"Train size: {len(X_train)}, Test size: {len(X_test)}")
-    print(f"Train positive rate (broken): {y_train.mean():.3f}, Test positive rate: {y_test.mean():.3f}")
+    print(
+        f"Train positive rate (broken): {y_train.mean():.3f}, Test positive rate: {y_test.mean():.3f}"
+    )
 
     clf = lgb.LGBMClassifier(
         n_estimators=300,
@@ -124,8 +139,7 @@ def train_and_export() -> dict:
     importances = clf.feature_importances_
     sorted_idx = np.argsort(importances)[::-1]
     importance_list = [
-        {"feature": FEATURE_COLUMNS[i], "importance": int(importances[i])}
-        for i in sorted_idx
+        {"feature": FEATURE_COLUMNS[i], "importance": int(importances[i])} for i in sorted_idx
     ]
     print("\nTop 5 Feature Importances:")
     for item in importance_list[:5]:
@@ -162,10 +176,13 @@ def train_and_export() -> dict:
     # Model card metadata
     card_data = {
         "model_name": "broken_promise_risk_scorer",
+        "label_source": (
+            "live-promise-tracker" if "live" in DATA_PATH.stem else "synthetic-mock-etl"
+        ),
         "model_version": "v1.0.0",
         "algorithm": "Gradient Boosted Trees (LightGBM)",
         "exported_format": "ONNX (opset 15)",
-        "training_date": datetime.now(timezone.utc).isoformat(),
+        "training_date": datetime.now(UTC).isoformat(),
         "training_rows": len(X_train),
         "test_rows": len(X_test),
         "feature_count": len(FEATURE_COLUMNS),
@@ -192,4 +209,14 @@ def train_and_export() -> dict:
 
 
 if __name__ == "__main__":
-    train_and_export()
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--data",
+        type=Path,
+        default=None,
+        help="training CSV (default: data/broken_promise_training.csv). "
+        "Use data/broken_promise_live.csv for tracker-settled labels.",
+    )
+    train_and_export(data_path=parser.parse_args().data)

@@ -50,10 +50,21 @@ def build_ml_workflow_steps(
             "details": {
                 "p_recovery": round(p_rec, 4),
                 "expected_value": round(ev, 2),
-                "expected_recovery": round(getattr(result.score, "expected_recovery", p_rec * getattr(case, "outstanding", 0.0)), 2),
+                "expected_recovery": round(
+                    getattr(
+                        result.score, "expected_recovery", p_rec * getattr(case, "outstanding", 0.0)
+                    ),
+                    2,
+                ),
                 "tier": tier_val,
-                "model_version": getattr(result.score.prediction, "model_version", "lgbm-recovery-v1") if hasattr(result.score, "prediction") else "lgbm-recovery-v1",
-                "fallback_used": getattr(result.score.prediction, "fallback_used", False) if hasattr(result.score, "prediction") else False,
+                "model_version": getattr(
+                    result.score.prediction, "model_version", "lgbm-recovery-v1"
+                )
+                if hasattr(result.score, "prediction")
+                else "lgbm-recovery-v1",
+                "fallback_used": getattr(result.score.prediction, "fallback_used", False)
+                if hasattr(result.score, "prediction")
+                else False,
                 "rationale": getattr(result.score, "rationale", ""),
                 "top_drivers": top_drivers[:3],
             },
@@ -65,7 +76,9 @@ def build_ml_workflow_steps(
     # -------------------------------------------------------------------------
     if drift_flag is not None:
         flagged = bool(getattr(drift_flag, "flagged", False))
-        drift_score = float(getattr(drift_flag, "anomaly_score", getattr(drift_flag, "score", 0.12)))
+        drift_score = float(
+            getattr(drift_flag, "anomaly_score", getattr(drift_flag, "score", 0.12))
+        )
         details_dict = getattr(drift_flag, "details", {}) or {}
         raw_drivers = details_dict.get("top_drivers", getattr(drift_flag, "drivers", [])) or []
         driver_dicts = [d.model_dump() if hasattr(d, "model_dump") else d for d in raw_drivers]
@@ -123,7 +136,9 @@ def build_ml_workflow_steps(
         bp_score = float(broken_promise_score)
         is_high_risk = bp_score > 0.60
         is_low_risk = bp_score < 0.35
-        status_slug = "high_risk" if is_high_risk else ("low_risk" if is_low_risk else "moderate_risk")
+        status_slug = (
+            "high_risk" if is_high_risk else ("low_risk" if is_low_risk else "moderate_risk")
+        )
         verdict_str = (
             f"High Promise Risk ({bp_score * 100:.1f}%) — High risk of default on promise"
             if is_high_risk
@@ -191,7 +206,9 @@ def build_ml_workflow_steps(
                 "details": {
                     "arm": arm,
                     "segment": getattr(timing, "segment", "default"),
-                    "scheduled_for": getattr(timing, "scheduled_for", None).isoformat() if hasattr(getattr(timing, "scheduled_for", None), "isoformat") else str(getattr(timing, "scheduled_for", "")),
+                    "scheduled_for": getattr(timing, "scheduled_for", None).isoformat()
+                    if hasattr(getattr(timing, "scheduled_for", None), "isoformat")
+                    else str(getattr(timing, "scheduled_for", "")),
                     "expected_response_rate": round(rate, 4),
                     "backed_off_to_global": getattr(timing, "backed_off_to_global", False),
                     "recommendation": f"Bandit selected slot '{arm}', outperforming uniform schedule by +5.3% response recovery rate.",
@@ -223,8 +240,7 @@ def build_ml_workflow_steps(
         allowed = bool(getattr(decision, "allowed", False))
         violations = getattr(decision, "violations", []) or []
         v_dicts = [
-            {"code": v.code, "message": v.message} if hasattr(v, "code") else v
-            for v in violations
+            {"code": v.code, "message": v.message} if hasattr(v, "code") else v for v in violations
         ]
         steps.append(
             {

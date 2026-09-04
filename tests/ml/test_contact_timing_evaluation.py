@@ -39,10 +39,22 @@ def test_replay_beats_random_on_separable_signal():
     # Strong planted gap: morning always works, late never does.
     rows = []
     for i in range(200):
-        rows.append({"customer_id": f"C-{i % 40}", "segment": "reliable_prompt_clean",
-                     "arm": "tue_morning", "reward": 1})
-        rows.append({"customer_id": f"C-{i % 40}", "segment": "reliable_prompt_clean",
-                     "arm": "fri_late", "reward": 0})
+        rows.append(
+            {
+                "customer_id": f"C-{i % 40}",
+                "segment": "reliable_prompt_clean",
+                "arm": "tue_morning",
+                "reward": 1,
+            }
+        )
+        rows.append(
+            {
+                "customer_id": f"C-{i % 40}",
+                "segment": "reliable_prompt_clean",
+                "arm": "fri_late",
+                "reward": 0,
+            }
+        )
     frame = pd.DataFrame(rows)
     train = frame.iloc[:300]
     heldout = frame.iloc[300:].copy()

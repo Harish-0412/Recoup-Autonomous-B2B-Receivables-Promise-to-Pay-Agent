@@ -292,4 +292,3 @@ class RunCycleResponse(BaseModel):
     broken_promise_score: float | None = None
     broken_promise_status: str | None = None
     ml_workflow: list[MLWorkflowStep] = Field(default_factory=list)
-

@@ -20,6 +20,7 @@ from app.core.audit import DecisionLedger
 from app.core.evaluation import build_report, format_inr
 from app.core.policy import policy_config_from_settings
 from app.core.security import require_api_key
+from app.core.tenancy import TenantContext, require_tenant
 from app.db.session import get_db
 from app.models import Invoice
 from app.services import repository
@@ -31,6 +32,7 @@ router = APIRouter(prefix="/reports", tags=["reports"], dependencies=[Depends(re
 async def batch_report(
     limit: int = Query(default=500, ge=1, le=5000),
     db: AsyncSession = Depends(get_db),
+    tenant: TenantContext = Depends(require_tenant),
 ) -> dict[str, Any]:
     """Score and gate every open invoice, and return the evaluation table.
 
@@ -39,8 +41,8 @@ async def batch_report(
     not actually take.
     """
 
-    invoices = await repository.list_open_invoices(db, limit=limit)
-    cases = [await repository.load_case(db, invoice) for invoice in invoices]
+    invoices = await repository.list_open_invoices(db, tenant.business_id, limit=limit)
+    cases = [await repository.load_case(db, invoice, tenant.business_id) for invoice in invoices]
 
     ledger = DecisionLedger()
     results = run_batch(
@@ -53,14 +55,16 @@ async def batch_report(
     paid_stmt = select(
         func.count(Invoice.id),
         func.coalesce(func.sum(Invoice.amount_paid), 0.0),
-    ).where(Invoice.amount_paid > 0)
+    ).where(Invoice.amount_paid > 0, Invoice.business_id == tenant.business_id)
     paid_res = await db.execute(paid_stmt)
     paid_count, total_paid = paid_res.one()
 
     report.recovered_count = int(paid_count or 0)
     report.recovered_value = float(total_paid or 0.0)
     if report.flagged_for_intervention > 0 and paid_count > 0:
-        report.recovery_rate_of_flagged = round(float(paid_count) / float(report.flagged_for_intervention), 4)
+        report.recovery_rate_of_flagged = round(
+            float(paid_count) / float(report.flagged_for_intervention), 4
+        )
     else:
         report.recovery_rate_of_flagged = 0.0
 

@@ -92,7 +92,9 @@ def segment_for_snapshot(customer: Any) -> str:
     return segment_id(
         on_time_ratio_90d=float(customer.on_time_ratio_90d or 0.0),
         avg_days_late=float(customer.avg_days_late or 0.0),
-        broken_promise_rate=min(int(customer.prior_broken_promises_count or 0) / invoice_count, 1.0),
+        broken_promise_rate=min(
+            int(customer.prior_broken_promises_count or 0) / invoice_count, 1.0
+        ),
         dispute_rate=min(int(customer.prior_disputes_count or 0) / invoice_count, 1.0),
     )
 

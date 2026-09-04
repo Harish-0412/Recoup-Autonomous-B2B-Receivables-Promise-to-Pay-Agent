@@ -29,6 +29,14 @@ services:
         value: null # client pool off behind Render's managed Postgres pooler
       - key: TASK_API_KEY
         generateValue: true # copy into the scheduler job / GitHub secret
+      - key: RATE_LIMIT_REDIS_URL
+        sync: false
+      - key: OTEL_EXPORTER_OTLP_ENDPOINT
+        sync: false
+      - key: OTEL_EXPORTER_OTLP_HEADERS
+        sync: false
+      - key: OTEL_SERVICE_NAME
+        value: recoup
       - key: RAZORPAY_KEY_ID
         sync: false
       - key: RAZORPAY_KEY_SECRET

@@ -27,3 +27,10 @@ cloudflare-email-worker/.dev.vars
 cloudflare-email-worker/.dev.vars.*
 
 scratch/
+.cursor/
+.kiro/
+.trae/
+.freebuff/
+.deepeval/
+.pytest_tmp/
+tmp/
