@@ -29,6 +29,7 @@ executor reuses the invoice's existing link while it is still payable.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -123,6 +124,9 @@ class ExecutionService:
         intent: ExecutionIntent,
         result: ExecutionResult,
         message: RenderedMessage | None,
+        *,
+        timing_arm: str | None = None,
+        scheduled_for: datetime | None = None,
     ) -> None:
         """Write the attempt, and only touch counters when it was delivered."""
 
@@ -137,6 +141,8 @@ class ExecutionService:
             provider_message_id=result.provider_message_id,
             payment_link_id=result.payment_link_id,
             provider_error=result.error,
+            timing_arm=timing_arm,
+            scheduled_for=scheduled_for,
         )
 
         # A link that was created must be stored even if the *email* then
@@ -153,8 +159,17 @@ class ExecutionService:
         session: AsyncSession,
         intent: ExecutionIntent,
         invoice: Invoice,
+        *,
+        timing_arm: str | None = None,
+        scheduled_for: datetime | None = None,
     ) -> ExecutionResult:
-        """Deliver one approved action. Never raises on a provider failure."""
+        """Deliver one approved action. Never raises on a provider failure.
+
+        ``timing_arm`` / ``scheduled_for`` are the bandit's recommendation for
+        this touch, recorded on the contact row so a later reply can attribute
+        its reward to the slot that earned it. Timing never gates delivery: a
+        missing suggestion sends now, exactly as before.
+        """
 
         log = bind_logger(
             logger,
@@ -168,7 +183,10 @@ class ExecutionService:
             # Not a provider failure and not retryable by waiting: this customer
             # has no address. Recorded so it shows up as a data problem.
             result = ExecutionResult.failure(intent, "customer has no email address on file")
-            await self._record(session, invoice, intent, result, None)
+            await self._record(
+                session, invoice, intent, result, None,
+                timing_arm=timing_arm, scheduled_for=scheduled_for,
+            )
             log.warning("Cannot contact customer", reason="no_email")
             return result
 
@@ -197,7 +215,10 @@ class ExecutionService:
                     subject=message.subject,
                     body_preview=message.preview(),
                 )
-                await self._record(session, invoice, intent, result, message)
+                await self._record(
+                    session, invoice, intent, result, message,
+                    timing_arm=timing_arm, scheduled_for=scheduled_for,
+                )
                 log.warning("Payment link failed; nothing sent", error=link_error)
                 return result
 
@@ -232,7 +253,10 @@ class ExecutionService:
                 result = result.model_copy(
                     update={"payment_link_url": link.url, "payment_link_reused": link.reused}
                 )
-            await self._record(session, invoice, intent, result, message)
+            await self._record(
+                session, invoice, intent, result, message,
+                timing_arm=timing_arm, scheduled_for=scheduled_for,
+            )
             log.warning("Send failed; ladder not advanced", error=sent.error)
             return result
 
@@ -250,7 +274,10 @@ class ExecutionService:
             payment_link_reused=bool(link and link.reused),
             amount_requested=intent.payable_amount,
         )
-        await self._record(session, invoice, intent, result, message)
+        await self._record(
+            session, invoice, intent, result, message,
+            timing_arm=timing_arm, scheduled_for=scheduled_for,
+        )
         log.info(
             "Delivered",
             status=result.status.value,

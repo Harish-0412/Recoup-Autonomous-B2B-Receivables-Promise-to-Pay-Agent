@@ -15,6 +15,7 @@ from sqlalchemy import text
 # the FastAPI instance. Inside lifespan() that same import would rebind the
 # function's own `app` parameter.
 from app import models as _models  # noqa: F401
+from app.api.contact_timing import router as contact_timing_router
 from app.api.health import router as health_router
 from app.api.invoices import router as invoices_router
 from app.api.models import router as models_router
@@ -89,6 +90,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(contact_timing_router, prefix="/api/v1")
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(invoices_router, prefix="/api/v1")
 app.include_router(models_router, prefix="/api/v1")

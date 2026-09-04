@@ -204,6 +204,14 @@ class ContactLog(Base):
     payment_link_id: Mapped[str | None] = mapped_column(String(64), default=None, index=True)
     #: Why a FAILED attempt failed. Empty on success.
     provider_error: Mapped[str | None] = mapped_column(Text, default=None)
+    #: The bandit arm this contact was sent in (e.g. "tue_midday"), and the
+    #: recommended send time. Null when the timing model was unavailable: the
+    #: arm is how a later reply attributes its reward to the slot that earned
+    #: it, which is what keeps the bandit learning from genuine responses.
+    timing_arm: Mapped[str | None] = mapped_column(String(32), default=None)
+    scheduled_for: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
 
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
 

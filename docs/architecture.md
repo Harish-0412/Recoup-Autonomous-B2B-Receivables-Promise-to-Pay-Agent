@@ -265,7 +265,7 @@ itself repeats:
 | [eventsourcing](https://github.com/pyeventsourcing/eventsourcing) | hash-chained ledger | On the critical path for everything else |
 | [SetFit](https://github.com/huggingface/setfit) | LLM reply baseline | Needs labelled replies that do not exist yet |
 | [SDV](https://github.com/sdv-dev/SDV) | archetype generator | Current generator works and is tested |
-| [MABWiser](https://github.com/fidelity/mabwiser) | fixed contact cadence | Phase 11 stretch: contextual bandit for contact timing |
+| Contact-timing bandit | fixed contact cadence | **Shipped as custom segmented Thompson Sampling** (`src/ml/contact_timing`) instead of MABWiser — no new dependency; see `docs/contact_timing_model_card.md` |
 | Policy Simulation Engine (counterfactual replay) | live policy tuning by gut feel | The standout differentiator, not yet built — contract first |
 
 ### Policy Simulation Engine — the planned standout

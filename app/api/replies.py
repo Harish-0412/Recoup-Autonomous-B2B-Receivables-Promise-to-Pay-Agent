@@ -61,6 +61,7 @@ from app.schemas.models import (
     ClassifyPreviewOut,
 )
 from app.schemas.replies import ReplyIngestResponse, ReplyReviewItem, ReplyReviewQueue
+from app.services import contact_timing as timing_service
 from app.services import repository
 from app.services.reply_routing import resolve_from_recipients, verify_svix_signature
 from src.ml.config import MLSettings
@@ -324,6 +325,22 @@ async def _process(
         classifier_version=prediction.model_version,
         fallback_used=prediction.fallback_used,
     )
+
+    # Online learning for the contact-timing bandit: a reply is a genuine
+    # engagement event, so the slot of the last timed contact earns reward 1.
+    # Guarded and silent -- learning must never break the reply path -- and
+    # opt-outs are excluded: a STOP that "worked" must not teach the bandit
+    # to favour the slot that provoked it.
+    if prediction.intent not in _OPT_OUT_INTENTS and customer is not None:
+        try:
+            last_contact = await repository.last_timed_contact(db, invoice.id)
+            if last_contact is not None and last_contact.timing_arm:
+                timing_service.record_reply_engagement(
+                    segment=timing_service.segment_for_snapshot(customer),
+                    arm=last_contact.timing_arm,
+                )
+        except Exception as exc:  # noqa: BLE001 - learning is best-effort
+            logger.debug("Contact-timing update skipped", error=str(exc))
 
     if prediction.intent in _OPT_OUT_INTENTS and customer is not None:
         await repository.record_opt_out(

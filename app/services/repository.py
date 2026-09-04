@@ -12,7 +12,7 @@ handed, so building that set in one audited place beats rebuilding it per route.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -237,6 +237,27 @@ async def load_case(
 COUNTED_DELIVERIES = (DeliveryStatus.SENT, DeliveryStatus.SIMULATED)
 
 
+async def last_timed_contact(session: AsyncSession, invoice_pk: int) -> ContactLog | None:
+    """The most recent delivered contact that carries a bandit arm.
+
+    Attribution for the online update: a reply rewards the slot of the last
+    contact that named one. Contacts from before the timing model existed
+    carry no arm and are skipped rather than guessed at.
+    """
+
+    result = await session.execute(
+        select(ContactLog)
+        .where(
+            ContactLog.invoice_pk == invoice_pk,
+            ContactLog.status.in_(COUNTED_DELIVERIES),
+            ContactLog.timing_arm.is_not(None),
+        )
+        .order_by(ContactLog.sent_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 async def contacts_sent_count(session: AsyncSession, invoice_pk: int) -> int:
     """How many messages have actually gone out about this invoice.
 
@@ -267,6 +288,8 @@ async def record_contact(
     provider_message_id: str | None = None,
     payment_link_id: str | None = None,
     provider_error: str | None = None,
+    timing_arm: str | None = None,
+    scheduled_for: datetime | None = None,
 ) -> ContactLog:
     """Record one delivery *attempt*, and update counters only if it landed.
 
@@ -292,6 +315,8 @@ async def record_contact(
         provider_message_id=provider_message_id,
         payment_link_id=payment_link_id,
         provider_error=provider_error,
+        timing_arm=timing_arm,
+        scheduled_for=scheduled_for,
     )
     session.add(contact)
 

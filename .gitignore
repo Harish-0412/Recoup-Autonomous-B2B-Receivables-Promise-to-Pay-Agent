@@ -34,6 +34,11 @@ data/reply_model/
 # The committed summary of these numbers lives in docs/recovery_model_card.md.
 data/recovery_model/
 
+# Contact-timing engagement log: regenerate with
+# scripts/generate_contact_timing_data.py. The committed summary of these
+# numbers lives in docs/contact_timing_model_card.md.
+data/contact_timing/
+
 # Coverage output
 .coverage
 coverage.xml

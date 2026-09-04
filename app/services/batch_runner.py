@@ -40,7 +40,7 @@ from app.models import (
     InvoiceStatus,
     PromiseStatus,
 )
-from app.services import repository
+from app.services import contact_timing, repository
 from app.services.executor import ExecutionIntent, build_execution_service
 from src.ml.versioning import utc_now
 
@@ -107,6 +107,11 @@ class RunInvoiceDecision(BaseModel):
 
     # Next expected follow-up
     expected_followup: ExpectedFollowup
+
+    # Contact-timing recommendation for this touch, if the bandit was consulted.
+    timing_arm: str | None = None
+    scheduled_for: str | None = None
+    timing_fallback: bool = False
 
 
 class RunSummary(BaseModel):
@@ -556,9 +561,20 @@ async def run_batch_cycle(
                 )
                 continue
 
-            # 6. Execute outbound contact
+            # 6. Execute outbound contact. The bandit is consulted first: its
+            # recommendation travels with the send and is recorded on the
+            # contact row, so a later reply can attribute its reward to the
+            # slot that earned it. Timing never gates delivery -- a missing
+            # suggestion sends now, exactly as before.
+            timing = contact_timing.suggest_for_case(case)
             intent = ExecutionIntent.from_decision(case, result.action, result.decision)
-            execution = await executor.execute(session, intent, invoice)
+            execution = await executor.execute(
+                session,
+                intent,
+                invoice,
+                timing_arm=None if timing.fallback_used else timing.arm,
+                scheduled_for=timing.scheduled_for,
+            )
 
             append_decision_trace(
                 invoice_id=invoice.invoice_id,
@@ -575,6 +591,9 @@ async def run_batch_cycle(
                 ladder_step=execution.ladder_step,
                 provider_message_id=execution.provider_message_id,
                 payment_link_id=execution.payment_link_id,
+                timing_arm=None if timing.fallback_used else timing.arm,
+                timing_expected_rate=timing.expected_response_rate,
+                timing_fallback=timing.fallback_used,
             )
 
             if execution.delivered:
@@ -619,6 +638,9 @@ async def run_batch_cycle(
                     body_preview=execution.body_preview,
                     payment_link_url=execution.payment_link_url,
                     expected_followup=followup,
+                    timing_arm=None if timing.fallback_used else timing.arm,
+                    scheduled_for=timing.scheduled_for.isoformat(),
+                    timing_fallback=timing.fallback_used,
                 )
             )
 
