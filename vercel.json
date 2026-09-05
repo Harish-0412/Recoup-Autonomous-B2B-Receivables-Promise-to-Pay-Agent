@@ -1,21 +1,6 @@
-﻿{
+{
   "buildCommand": "cd frontend && npm run build",
   "installCommand": "cd frontend && npm install",
   "outputDirectory": "frontend/.next",
-  "framework": "nextjs",
-  "regions": ["iad1"],
-  "env": {
-    "NEXT_PUBLIC_API_URL": {
-      "description": "Backend API base URL (e.g., https://recoup-api.onrender.com/api/v1)",
-      "required": true
-    },
-    "NEXT_PUBLIC_TASK_API_KEY": {
-      "description": "Operator bearer token for API authentication",
-      "required": false
-    }
-  },
-  "git": {
-    "silent": false
-  },
-  "crons": []
+  "framework": "nextjs"
 }

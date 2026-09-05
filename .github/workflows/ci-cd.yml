@@ -1,4 +1,4 @@
-﻿name: CI/CD Pipeline
+name: CI/CD Pipeline
 
 on:
   push:
@@ -272,7 +272,9 @@ jobs:
             exit 1
           fi
           npm install -g vercel
-          vercel deploy --prod --token "${{ secrets.VERCEL_TOKEN }}" \
+          vercel deploy --prod --yes --token "${{ secrets.VERCEL_TOKEN }}" \
+            --build-env NEXT_PUBLIC_API_URL="${{ secrets.VERCEL_API_URL }}" \
+            --build-env NEXT_PUBLIC_TASK_API_KEY="${{ secrets.VERCEL_TASK_API_KEY }}" \
             --env NEXT_PUBLIC_API_URL="${{ secrets.VERCEL_API_URL }}" \
             --env NEXT_PUBLIC_TASK_API_KEY="${{ secrets.VERCEL_TASK_API_KEY }}"
         shell: bash
