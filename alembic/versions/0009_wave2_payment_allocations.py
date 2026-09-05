@@ -37,6 +37,7 @@ ledger. A future data migration can create seed allocations from existing
 from __future__ import annotations
 
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
@@ -128,7 +129,15 @@ def upgrade() -> None:
             sa.Column("invoice_pk", sa.Integer(), nullable=True),
             sa.Column(
                 "source",
-                sa.Enum(
+                # NOTE: must be the postgresql-dialect ENUM, not the generic
+                # sa.Enum -- the generic type silently drops create_type on
+                # the ground (it has no such concept; only the dialect-
+                # specific class does), so create_type=False here was
+                # inert and CREATE TABLE re-issued CREATE TYPE regardless
+                # of _create_enum_safely already having created it above.
+                # That, not any crash-restart race, was the actual cause of
+                # every "allocation_source already exists" deploy failure.
+                postgresql.ENUM(
                     "razorpay_link",
                     "razorpay_payment",
                     "bank_utr",
@@ -185,7 +194,9 @@ def upgrade() -> None:
             sa.Column("business_id", sa.Text(), nullable=False, server_default="default"),
             sa.Column(
                 "provider",
-                sa.Enum(
+                # See the note on the payment_allocations.source column
+                # above -- generic sa.Enum ignores create_type entirely.
+                postgresql.ENUM(
                     "zoho_books",
                     "quickbooks",
                     "razorpay_invoices",

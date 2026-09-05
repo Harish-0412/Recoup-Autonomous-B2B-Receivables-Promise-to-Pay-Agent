@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
@@ -44,19 +45,23 @@ def upgrade() -> None:
         sa.Column("event", sa.String(length=128), nullable=False),
         sa.Column(
             "outcome",
-            sa.Enum(
+            # NOTE: must be the postgresql-dialect ENUM, not generic sa.Enum
+            # -- the generic type has no create_type concept and silently
+            # drops it, so CREATE TABLE would re-issue CREATE TYPE regardless.
+            # This type was already created by 0001_baseline for
+            # decision_traces.outcome; re-declaring the same enum name as an
+            # inline column type here would otherwise have SQLAlchemy attempt
+            # to CREATE TYPE it a second time as part of emitting this CREATE
+            # TABLE -- the exact failure mode that hit allocation_source in
+            # 0009 (root-caused as the generic-Enum bug, not a crash-restart
+            # race -- see that migration's comment).
+            postgresql.ENUM(
                 "approved",
                 "blocked",
                 "executed",
                 "skipped",
                 "failed",
                 name="decision_outcome",
-                # This type was already created by 0001_baseline for
-                # decision_traces.outcome. Re-declaring the same enum name as
-                # an inline column type here would otherwise have SQLAlchemy
-                # attempt to CREATE TYPE it a second time as part of emitting
-                # this CREATE TABLE -- the exact failure mode that hit
-                # allocation_source in 0009 under a crash-restarted deploy.
                 create_type=False,
             ),
             nullable=True,
