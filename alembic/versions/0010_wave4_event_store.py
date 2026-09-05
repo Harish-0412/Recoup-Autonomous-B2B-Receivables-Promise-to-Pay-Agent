@@ -25,6 +25,13 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    if "recoup_event_records" in sa.inspect(bind).get_table_names():
+        # Idempotent, matching 0006_batch_runs / 0009_wave2_payment_allocations:
+        # a crash-restarted deploy can leave this committed with no matching
+        # alembic_version row.
+        return
+
     op.create_table(
         "recoup_event_records",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -44,6 +51,13 @@ def upgrade() -> None:
                 "skipped",
                 "failed",
                 name="decision_outcome",
+                # This type was already created by 0001_baseline for
+                # decision_traces.outcome. Re-declaring the same enum name as
+                # an inline column type here would otherwise have SQLAlchemy
+                # attempt to CREATE TYPE it a second time as part of emitting
+                # this CREATE TABLE -- the exact failure mode that hit
+                # allocation_source in 0009 under a crash-restarted deploy.
+                create_type=False,
             ),
             nullable=True,
         ),
