@@ -13,7 +13,18 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-import numpy as np
+# numpy is part of the optional `ml` extra (pyproject.toml), kept out of the
+# base API install so that container doesn't carry ~500MB of ML wheels it
+# mostly never imports. This module's own docstring promises graceful
+# degradation to a heuristic when the ONNX model is unavailable -- a bare
+# top-level `import numpy` would break that promise before it even got a
+# chance to run, crashing the whole app at import time instead. Fall back to
+# the heuristic path in score_broken_promise() the same way a missing/broken
+# ONNX session already does.
+try:
+    import numpy as np
+except ImportError:
+    np = None  # type: ignore[assignment]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ONNX_MODEL_PATH = REPO_ROOT / "models" / "broken_promise" / "predictor.onnx"
@@ -50,7 +61,16 @@ def get_onnx_session() -> Any:
         if not ONNX_MODEL_PATH.exists():
             # If not yet trained, return None so fallback can be used
             return None
-        import onnxruntime as ort
+        try:
+            import onnxruntime as ort
+        except ImportError:
+            # onnxruntime isn't declared anywhere in pyproject.toml (base or
+            # the `ml` extra) -- it's simply not installed in a base API
+            # container. Model file present but no runtime to load it with
+            # is the same "not ready yet" situation as no file at all: fall
+            # back to the heuristic rather than crash the app at import/call
+            # time.
+            return None
 
         # Configure session with single thread for minimal latency in async loop
         opts = ort.SessionOptions()
@@ -201,8 +221,9 @@ def score_broken_promise(payload: dict[str, Any], as_of: date | None = None) -> 
     try:
         sess = get_onnx_session()
         features = build_broken_promise_features(payload, as_of)
-        if sess is None:
-            # Fallback heuristic if ONNX not yet compiled
+        if sess is None or np is None:
+            # Fallback heuristic if ONNX not yet compiled, or numpy (the
+            # optional `ml` extra) isn't installed in this environment
             broken_rate = features[0]
             horizon = features[17]
             heuristic = 0.35 + 0.40 * broken_rate + 0.01 * min(horizon, 30)

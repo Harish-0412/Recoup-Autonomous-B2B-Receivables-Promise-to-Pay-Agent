@@ -82,6 +82,16 @@ dependencies = [
     # --- logging ---
     "structlog>=24.4",
     "python-json-logger>=2.0",
+
+    # numpy: NOT training-only. src/agent/promise_handler.py (broken-promise
+    # scoring) and src/ml/cash_forecast/simulate.py (Monte Carlo cash
+    # forecast) both import it unconditionally, and both routers are wired
+    # into app/main.py unconditionally too -- so a base install without it
+    # can't even start uvicorn (ModuleNotFoundError at import time, not a
+    # graceful degrade). It's a small, general-purpose array library, not
+    # part of the ~500MB the `ml` extra below is actually trying to avoid
+    # (xgboost/shap/sdv/pandas), so it belongs here instead.
+    "numpy>=1.26",
 ]
 
 [project.optional-dependencies]
@@ -94,7 +104,6 @@ ml = [
     "xgboost>=2.0",
     "shap>=0.45",
     "pandas>=2.2",
-    "numpy>=1.26",
     "joblib>=1.3",
     "sdv>=1.38",
     # xlrd parses the UCI drift-training source (.xls) in
