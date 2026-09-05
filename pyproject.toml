@@ -59,7 +59,8 @@ dependencies = [
     # --- agent loop ---
     # instructor:     validated, retry-on-failure structured LLM output.
     # transitions:    escalation-ladder FSM; the library enforces the guards.
-    # business-rules: policy rules as data rather than nested ifs.
+    # business-rules: policy rules as data rather than nested ifs (legacy
+    #                 backend; the gate now evaluates via OPA/Rego, see below).
     "instructor>=1.16",
     "transitions>=0.9",
     "business-rules>=1.1",
@@ -67,6 +68,12 @@ dependencies = [
 
     # eventsourcing:  aggregate event store, snapshotting, and time-travel replay.
     "eventsourcing>=9.5",
+
+    # regopy: in-process Open Policy Agent -- Microsoft's rego-cpp runtime
+    # (C++), wheels for win/linux/mac on 3.11-3.13. The policy gate compiles
+    # PolicyConfig to Rego and evaluates it here; no sidecar process, so a
+    # single decision stays well under the 20ms p99 budget.
+    "regopy>=1.5",
 
     # --- integrations ---
     # razorpay must stay >=2.0: 1.4.x imports pkg_resources, which modern
@@ -83,15 +90,22 @@ dependencies = [
     "structlog>=24.4",
     "python-json-logger>=2.0",
 
-    # numpy: NOT training-only. src/agent/promise_handler.py (broken-promise
-    # scoring) and src/ml/cash_forecast/simulate.py (Monte Carlo cash
-    # forecast) both import it unconditionally, and both routers are wired
-    # into app/main.py unconditionally too -- so a base install without it
-    # can't even start uvicorn (ModuleNotFoundError at import time, not a
-    # graceful degrade). It's a small, general-purpose array library, not
-    # part of the ~500MB the `ml` extra below is actually trying to avoid
-    # (xgboost/shap/sdv/pandas), so it belongs here instead.
+    # numpy, scikit-learn, joblib: NOT training-only, despite living in the
+    # `ml` extra's original intent below. app/main.py unconditionally wires
+    # up replies_router, which imports src.ml.reply.classifier (the shipped
+    # TF-IDF/SVM reply-intent cascade) at module level -- that needs numpy +
+    # scikit-learn directly, and src.ml.artifacts (loading the saved
+    # vectorizer/model) needs joblib. Same story for src/agent/promise_handler
+    # (numpy) and src/ml/cash_forecast/simulate (numpy) via their own
+    # unconditionally-wired routers. A base install without these three can't
+    # even start uvicorn (ModuleNotFoundError at import time, not the
+    # documented graceful degrade to a rules-based fallback). They're also
+    # not what makes the `ml` extra ~500MB -- xgboost/shap/sdv/pandas/pyarrow
+    # are the heavy ones, and those genuinely are training-only (verified: no
+    # module under app/ or the routers it wires up imports any of them).
     "numpy>=1.26",
+    "scikit-learn>=1.4",
+    "joblib>=1.3",
 ]
 
 [project.optional-dependencies]
@@ -100,12 +114,14 @@ dependencies = [
 # imports: app.core.agent degrades to the rules-based scorer when these are
 # absent, which is the documented behaviour.
 ml = [
-    "scikit-learn>=1.4",
     "xgboost>=2.0",
     "shap>=0.45",
     "pandas>=2.2",
-    "joblib>=1.3",
     "sdv>=1.38",
+    # pyarrow: parquet engine for the Wave 6 warehouse ETL
+    # (scripts/etl/real_outcomes.py writes, src/ml/recovery/warehouse.py reads).
+    # pandas raises without a usable engine when pyarrow is absent.
+    "pyarrow>=15.0",
     # xlrd parses the UCI drift-training source (.xls) in
     # scripts/train_drift_model.py. Training-time only: the API container
     # never imports it (drift inference loads a joblib artifact).
@@ -188,6 +204,7 @@ module = [
     "transitions.*",
     "business_rules.*",
     "eventsourcing.*",
+    "regopy.*",
     "sdv.*",
     "sdmetrics.*",
 ]
