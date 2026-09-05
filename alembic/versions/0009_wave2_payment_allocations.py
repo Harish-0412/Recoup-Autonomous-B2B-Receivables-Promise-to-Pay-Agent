@@ -55,14 +55,37 @@ def _create_enum_safely(enum_obj: sa.Enum, bind: sa.engine.Connection) -> None:
     see ``alembic/env.py`` -- so a mid-chain failure should roll everything
     back, but an abruptly killed process does not always get the chance to)
     can leave a type committed with no matching ``alembic_version`` row, so
-    the next attempt's checkfirst query loses the race. Belt and braces,
-    matching the idiom ``8ace19fe72f3`` already uses for exactly this reason.
+    the next attempt's checkfirst query loses the race.
+
+    A bare Python ``try/except`` around ``enum_obj.create()`` is *not*
+    sufficient either: once Postgres raises inside a transaction, that
+    transaction is aborted and every later statement in the same
+    ``alembic upgrade head`` run fails with "current transaction is aborted"
+    -- catching the Python exception doesn't undo that. A ``DO`` block with
+    its own ``EXCEPTION`` clause gets PL/pgSQL's implicit sub-transaction, so
+    a caught ``duplicate_object`` rolls back only that statement and leaves
+    the outer migration transaction healthy. This is what actually fixes the
+    race described above, belt-and-braces alongside ``8ace19fe72f3``.
     """
 
-    try:
-        enum_obj.create(bind, checkfirst=True)
-    except Exception:
-        pass
+    if bind.dialect.name != "postgresql":
+        # SQLite (the clean-checkout demo path) has no native enum type --
+        # SQLAlchemy represents it as a CHECK constraint on the column
+        # instead, so there is no separate type to create here.
+        return
+
+    values = ", ".join(f"'{v}'" for v in enum_obj.enums)
+    bind.execute(
+        sa.text(
+            f"""
+            DO $$ BEGIN
+                CREATE TYPE {enum_obj.name} AS ENUM ({values});
+            EXCEPTION
+                WHEN duplicate_object THEN null;
+            END $$;
+            """
+        )
+    )
 
 
 def upgrade() -> None:
