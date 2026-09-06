@@ -114,27 +114,27 @@ dependencies = [
 # imports: app.core.agent degrades to the rules-based scorer when these are
 # absent, which is the documented behaviour.
 ml = [
-    "xgboost>=2.0",
-    "shap>=0.45",
-    "pandas>=2.2",
-    "sdv>=1.38",
+    "xgboost>2.0",
+    "shap>0.45",
+    "pandas>2.2",
+    "sdv>1.38",
     # pyarrow: parquet engine for the Wave 6 warehouse ETL
     # (scripts/etl/real_outcomes.py writes, src/ml/recovery/warehouse.py reads).
     # pandas raises without a usable engine when pyarrow is absent.
-    "pyarrow>=15.0",
+    "pyarrow>15.0",
     # xlrd parses the UCI drift-training source (.xls) in
     # scripts/train_drift_model.py. Training-time only: the API container
     # never imports it (drift inference loads a joblib artifact).
-    "xlrd>=2.0",
+    "xlrd>2.0",
 ]
 
 # Depends on the ml extra on purpose: tests/ml/ imports sklearn, xgboost and
 # shap directly, so a dev install that omitted them would collect-error.
 dev = [
     "recoup[ml]",
-    "pytest>=8.2",
-    "pytest-asyncio>=0.24,<0.25",
-    "pytest-cov>=5.0",
+    "pytest>8.2",
+    "pytest-asyncio>0.24,<0.25",
+    "pytest-cov>5.0",
     "ruff==0.7.1",
     "mypy>=1.13",
     "types-requests>=2.32",
