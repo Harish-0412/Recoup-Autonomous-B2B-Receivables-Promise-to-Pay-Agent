@@ -22,7 +22,6 @@
 | Document | Description |
 |---|---|
 | **[📘 Full Technical Documentation (PDF)](./Recoup_Technical_Documentation.pdf)** | Complete backend readbook — architecture, all components, API surface, ML models, security model, scaling, deployment |
-| **[📝 Full Technical Documentation (Word)](./Recoup_Technical_Documentation.docx)** | Same content in editable Word format |
 | **[🏗️ Architecture Deep-Dive](./docs/architecture.md)** | Expanded component responsibilities, design decisions, safety properties |
 | **[📊 Batch Evaluation Report](./docs/evaluation_report.md)** | Live metrics from a 600-invoice run — recovery rate, ₹ recovered, compliance violations |
 | **[🤖 Recovery Model Card](./docs/recovery_model_card.md)** | AUC, Brier, ECE, SHAP importance for the XGBoost recovery scorer |
