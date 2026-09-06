@@ -1,0 +1,12 @@
+# Project-root .vercelignore for the Next.js app.
+#
+# Vercel's monorepo behavior: when the project root directory (frontend/)
+# contains its own .vercelignore, it takes precedence over the one at the
+# repository root. Without this file, the repo-root .vercelignore (written for
+# the Python backend, which ignores src/) is applied here too — and since those
+# are gitignore-style unanchored patterns, `src/` matched frontend/src/ and the
+# entire Next.js app source was stripped from uploads, yielding a build with no
+# routes (only the platform /404). node_modules and .next are excluded by
+# Vercel's defaults, so nothing else needs to be listed.
+.next
+node_modules
