@@ -73,3 +73,16 @@ body {
   display: inline-block;
   will-change: transform, opacity;
 }
+
+/* Hide Next.js DevTools / Issue badge on the bottom left */
+nextjs-portal,
+[data-nextjs-toast],
+[data-nextjs-dialog-overlay],
+div[data-nextjs-dev-tools],
+#nextjs-dev-tools,
+[data-nextjs-dev-indicator] {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
+}

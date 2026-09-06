@@ -14,6 +14,8 @@ import {
   Loader2,
 } from "lucide-react";
 import type { RunCycleResponse } from "@/lib/api";
+import { describePolicyCode } from "@/lib/policyLabels";
+import InfoTooltip from "@/components/ui/InfoTooltip";
 import { cn } from "@/lib/utils";
 
 export type CycleStage = "score" | "propose" | "gate" | "execute";
@@ -122,6 +124,10 @@ export function DecisionCycleVisualizer({
         <span>
           p(recovery) <strong>{(result.p_recovery * 100).toFixed(1)}%</strong> · EV{" "}
           <strong>{formatINR(result.expected_value)}</strong>
+          <InfoTooltip side="bottom">
+            EV = P(recovery) × outstanding × urgency weight − intervention cost. The tier this
+            invoice gets proposed next is ranked on this number, the same way the queue is.
+          </InfoTooltip>
           <span className="block text-[10px] opacity-70 mt-0.5">
             {result.scorer_fallback ? `rules-based (${result.scorer_version || "fallback"})` : result.scorer_version}
           </span>
@@ -154,7 +160,7 @@ export function DecisionCycleVisualizer({
           {result.decision.allowed ? "Allowed" : "Blocked"} — {result.decision.reason}
           {result.decision.violations.length > 0 && (
             <span className="block text-[10px] mt-0.5">
-              {result.decision.violations.map((v) => v.code).join(", ")}
+              {result.decision.violations.map((v) => describePolicyCode(v.code)).join(", ")}
             </span>
           )}
         </span>
@@ -187,10 +193,18 @@ export function DecisionCycleVisualizer({
 
   return (
     <div className="w-full">
-      <div className="flex items-center gap-2 mb-3">
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
         <span className="text-[11px] font-mono uppercase tracking-widest text-zinc-500">
           score → propose → <strong className="text-zinc-800 dark:text-zinc-100">gate</strong> → transition → execute
         </span>
+        {result?._offline_fallback && (
+          <span
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-amber-100 dark:bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-300/60 dark:border-amber-500/25"
+            title="POST /invoices/{id}/run-cycle was unreachable. This is fabricated client-side sample data, not a real decision — nothing was scored, gated, or sent."
+          >
+            Simulated — backend unreachable
+          </span>
+        )}
       </div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 relative">
         {STAGES.map((s, idx) => {

@@ -199,6 +199,13 @@ export interface RunCycleResponse {
   broken_promise_score?: number | null;
   broken_promise_status?: string | null;
   ml_workflow?: MLWorkflowStep[];
+  /**
+   * True only when this response was fabricated client-side by
+   * `getFallbackCycleResponse` because `POST /invoices/{id}/run-cycle` was
+   * unreachable — never set on a genuine backend response. UI surfaces
+   * should badge this clearly rather than let it read as live data.
+   */
+  _offline_fallback?: boolean;
 }
 
 /** One step of the explainable ML workflow trace (app/services/ml_workflow.py). */
@@ -285,22 +292,39 @@ export interface TaskStatusResponse {
   expected_interval_seconds?: number;
 }
 
-export function getApiBase(): string {
-  if (typeof window !== 'undefined' && window.location) {
-    const env = process.env.NEXT_PUBLIC_API_URL;
-    if (env && !env.includes('127.0.0.1') && !env.includes('localhost')) {
-      return env;
-    }
-    return `${window.location.protocol}//${window.location.hostname}:8000/api/v1`;
+/**
+ * Production API base — the FastAPI backend on Render. Any non-localhost
+ * deployment (e.g. Vercel) falls back to this automatically when
+ * NEXT_PUBLIC_API_URL is not injected at build time. To override on a given
+ * host, set NEXT_PUBLIC_API_URL in the Vercel dashboard / build env — it wins
+ * over this constant.
+ */
+const PROD_API_BASE_URL = 'https://recoup-api-soss.onrender.com/api/v1';
+
+function resolveApiBase(): string {
+  const env = process.env.NEXT_PUBLIC_API_URL;
+  if (env && !env.includes('127.0.0.1') && !env.includes('localhost')) {
+    // Explicit non-local build-time override (production dashboard env).
+    return env;
   }
-  return process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api/v1';
+  if (typeof window === 'undefined' || !window.location) {
+    // Server / static prerender: honour a non-local env, else the production API.
+    return env || PROD_API_BASE_URL;
+  }
+  const host = window.location.hostname;
+  if (host === 'localhost' || host === '127.0.0.1') {
+    // Local dev: assume the FastAPI backend runs on :8000 of this host.
+    return `${window.location.protocol}//${host}:8000/api/v1`;
+  }
+  // Deployed on a real host without a build-time env var: reach Render.
+  return PROD_API_BASE_URL;
 }
 
-const API_BASE = typeof window !== 'undefined'
-  ? (process.env.NEXT_PUBLIC_API_URL && !process.env.NEXT_PUBLIC_API_URL.includes('127.0.0.1') && !process.env.NEXT_PUBLIC_API_URL.includes('localhost')
-      ? process.env.NEXT_PUBLIC_API_URL
-      : `${window.location.protocol}//${window.location.hostname}:8000/api/v1`)
-  : (process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000/api/v1');
+export function getApiBase(): string {
+  return resolveApiBase();
+}
+
+const API_BASE = resolveApiBase();
 // Never fall back to a real credential: an unset key sends no header, so the
 // API answers 401/503 visibly instead of authenticating every install.
 const ENV_TASK_KEY = process.env.NEXT_PUBLIC_TASK_API_KEY || '';
@@ -722,8 +746,11 @@ export interface PolicyActionItem {
 }
 
 export interface PolicyRule {
-  conditions: PolicyConditions;
-  actions: PolicyActionItem[];
+  code?: string;
+  action?: string;
+  description?: string;
+  conditions?: PolicyConditions;
+  actions?: PolicyActionItem[];
 }
 
 export interface PolicyConfig {
@@ -789,7 +816,7 @@ export async function runInvoiceCycle(invoiceId: string): Promise<RunCycleRespon
   } catch (err) {
     console.warn('Backend unavailable, using simulated cycle output', err);
   }
-  return getFallbackCycleResponse(invoiceId);
+  return { ...getFallbackCycleResponse(invoiceId), _offline_fallback: true };
 }
 
 export async function fetchAuditTrail(invoiceId: string): Promise<AuditTrailOut> {

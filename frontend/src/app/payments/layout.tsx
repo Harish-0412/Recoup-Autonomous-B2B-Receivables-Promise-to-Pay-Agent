@@ -19,7 +19,7 @@ import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import StatusStrip from "@/components/StatusStrip";
 
-export default function QueueLayout({
+export default function PaymentsLayout({
   children,
 }: {
   children: React.ReactNode;

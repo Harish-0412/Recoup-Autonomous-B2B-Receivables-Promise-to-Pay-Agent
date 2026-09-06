@@ -11,6 +11,7 @@ import {
   PlayCircle,
   BrainCircuit,
   Sliders,
+  Wallet,
   LogOut,
 } from "lucide-react";
 import Link from "next/link";
@@ -62,6 +63,13 @@ export default function InboxLayout({
       ),
     },
     {
+      label: "Payments",
+      href: "/payments",
+      icon: (
+        <Wallet className="text-neutral-700 dark:text-neutral-200 h-5 w-5 flex-shrink-0" />
+      ),
+    },
+    {
       label: "Runs",
       href: "/runs",
       icon: (
@@ -85,12 +93,12 @@ export default function InboxLayout({
   ];
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-neutral-950 text-zinc-900 dark:text-zinc-100 flex flex-col antialiased">
+    <div className="h-screen w-full bg-zinc-50 dark:bg-neutral-950 text-zinc-900 dark:text-zinc-100 flex flex-col antialiased overflow-hidden">
       <StatusStrip />
 
-      <div className="flex flex-1 w-full overflow-hidden">
+      <div className="flex flex-1 w-full h-full min-h-0 overflow-hidden">
         <Sidebar open={open} setOpen={setOpen}>
-          <SidebarBody className="justify-between gap-10">
+          <SidebarBody className="justify-between gap-6 h-full">
             <div className="flex flex-col flex-1 overflow-y-auto overflow-x-hidden">
               {open ? <Logo /> : <LogoIcon />}
               <div className="mt-8 flex flex-col gap-1.5">
@@ -99,7 +107,7 @@ export default function InboxLayout({
                 ))}
               </div>
             </div>
-            <div className="mt-4 pt-4 border-t border-neutral-200/60 dark:border-white/5">
+            <div className="mt-auto pt-4 border-t border-neutral-200/60 dark:border-white/5">
               <SidebarLink
                 link={{
                   label: "Sign Out",
@@ -137,7 +145,7 @@ export default function InboxLayout({
           </SidebarBody>
         </Sidebar>
 
-        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
           <div className="flex-1 overflow-y-auto">{children}</div>
         </div>
       </div>

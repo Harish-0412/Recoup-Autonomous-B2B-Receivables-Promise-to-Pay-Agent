@@ -34,9 +34,19 @@ import { DecisionCycleVisualizer } from "@/components/case/DecisionCycleVisualiz
 import { MLWorkflowTrace } from "@/components/ml/MLWorkflowTrace";
 import { MLContextStrip } from "@/components/ml/MLContextStrip";
 import { BrokenPromiseRiskBadge } from "@/components/BrokenPromiseRiskBadge";
+import InfoTooltip from "@/components/ui/InfoTooltip";
+import { describePolicyCode, policyCodeDetail } from "@/lib/policyLabels";
 import { cn } from "@/lib/utils";
 
 const LADDER = ["monitoring", "reminded", "escalated", "human_handoff", "closed"] as const;
+
+const LADDER_STEP_INFO: Record<(typeof LADDER)[number], string> = {
+  monitoring: "Default state. No contact yet, or the last cycle decided to wait.",
+  reminded: "A reminder has been sent. The next contact is gated by the frequency cap.",
+  escalated: "The ladder moved up a rung — firmer language, possibly a bounded settlement offer.",
+  human_handoff: "The ladder is exhausted or a rule requires it; a person takes over from here.",
+  closed: "Terminal — reachable from any state (e.g. paid in full). No further automated action.",
+};
 
 function formatINR(amount: number): string {
   const abs = Math.abs(amount);
@@ -77,27 +87,33 @@ function EscalationStepper({ current }: { current: string }) {
   const activeIdx = LADDER.findIndex((s) => s === normalized);
   const safeIdx = activeIdx === -1 ? 0 : activeIdx;
   return (
-    <div className="flex items-center gap-1.5 flex-wrap">
-      {LADDER.map((step, idx) => {
-        const done = idx < safeIdx;
-        const active = idx === safeIdx;
-        return (
-          <div key={step} className="flex items-center gap-1.5">
-            <div
-              className={cn(
-                "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono font-semibold border",
-                done && "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20",
-                active && "bg-orange-500 text-black border-orange-500",
-                !done && !active && "bg-zinc-100 dark:bg-zinc-900 text-zinc-500 border-zinc-200 dark:border-white/10"
-              )}
-            >
-              {done ? <CheckCircle2 className="h-3 w-3" /> : null}
-              <span>{step}</span>
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {LADDER.map((step, idx) => {
+          const done = idx < safeIdx;
+          const active = idx === safeIdx;
+          return (
+            <div key={step} className="flex items-center gap-1.5">
+              <div
+                className={cn(
+                  "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono font-semibold border",
+                  done && "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20",
+                  active && "bg-orange-500 text-black border-orange-500",
+                  !done && !active && "bg-zinc-100 dark:bg-zinc-900 text-zinc-500 border-zinc-200 dark:border-white/10"
+                )}
+              >
+                {done ? <CheckCircle2 className="h-3 w-3" /> : null}
+                <span>{step}</span>
+              </div>
+              {idx < LADDER.length - 1 && <ArrowRight className="h-3 w-3 text-zinc-400" />}
             </div>
-            {idx < LADDER.length - 1 && <ArrowRight className="h-3 w-3 text-zinc-400" />}
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
+      <p className="text-[11px] text-zinc-500 dark:text-zinc-400 max-w-xl">
+        {LADDER_STEP_INFO[LADDER[safeIdx]]} A step only advances when the scorer proposes an
+        action <em>and</em> the policy gate allows it — there is no path that skips a rung.
+      </p>
     </div>
   );
 }
@@ -165,7 +181,7 @@ export default function CaseFilePage({ params }: { params: Promise<{ invoiceId: 
 
   return (
     <main className="min-h-screen bg-white dark:bg-black text-zinc-900 dark:text-white">
-      <div className="max-w-[1200px] mx-auto px-4 sm:px-6 py-6 space-y-6">
+      <div className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 space-y-6">
         {/* Breadcrumb */}
         <div className="flex items-center justify-between">
           <Link
@@ -210,8 +226,8 @@ export default function CaseFilePage({ params }: { params: Promise<{ invoiceId: 
             >
               <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
                 <div className="space-y-1.5">
-                  <p className="text-[11px] font-mono uppercase tracking-widest text-orange-600 dark:text-orange-400">
-                    Case File · {invoice.invoice_id}
+                  <p className="text-[11px] font-mono uppercase tracking-widest text-orange-600 dark:text-orange-400 flex items-center gap-1.5">
+                    <FileText className="h-3.5 w-3.5" /> Case File · {invoice.invoice_id}
                   </p>
                   <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">{invoice.customer_name}</h1>
                   <p className="text-xs font-mono text-zinc-500">
@@ -353,9 +369,17 @@ export default function CaseFilePage({ params }: { params: Promise<{ invoiceId: 
                     <p className="leading-relaxed">{cycleResult.rationale}</p>
                     <p className="font-mono text-[11px] text-zinc-500">{cycleResult.reason}</p>
                     {cycleResult.top_drivers.length > 0 && (
-                      <div className="pt-2 border-t border-zinc-100 dark:border-white/5 space-y-1 font-mono text-[11px]">
+                      <div className="pt-2 border-t border-zinc-100 dark:border-white/5 space-y-1">
+                        <p className="text-[10px] text-zinc-500 dark:text-zinc-400 flex items-center gap-1">
+                          Top drivers of this score
+                          <InfoTooltip>
+                            Each row is a feature and its SHAP contribution — how much that
+                            feature pushed P(recovery) up (green) or down (red) for this specific
+                            invoice, relative to the average case.
+                          </InfoTooltip>
+                        </p>
                         {cycleResult.top_drivers.slice(0, 3).map((d) => (
-                          <div key={d.feature} className="flex justify-between gap-2">
+                          <div key={d.feature} className="flex justify-between gap-2 font-mono text-[11px]">
                             <span className="truncate text-zinc-500">{d.feature}</span>
                             <span className={d.shap_contribution >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}>
                               {d.shap_contribution > 0 ? "+" : ""}{d.shap_contribution.toFixed(3)}
@@ -370,6 +394,21 @@ export default function CaseFilePage({ params }: { params: Promise<{ invoiceId: 
                     <p className="font-mono text-[11px]">
                       {cycleResult.state_before} → {cycleResult.state_after} · transitioned: {String(cycleResult.transitioned)} · terminal: {String(cycleResult.terminal)}
                     </p>
+                    {cycleResult.decision && cycleResult.decision.violations.length > 0 && (
+                      <div className="rounded-lg bg-red-50 dark:bg-red-500/5 border border-red-200/60 dark:border-red-500/20 p-3 space-y-1.5">
+                        <p className="text-[10px] font-mono uppercase tracking-widest text-red-600 dark:text-red-400">
+                          Blocked by policy
+                        </p>
+                        {cycleResult.decision.violations.map((v, i) => (
+                          <div key={i} className="text-xs">
+                            <span className="font-semibold text-red-700 dark:text-red-300">
+                              {describePolicyCode(v.code)}
+                            </span>
+                            <span className="text-zinc-500"> — {policyCodeDetail(v.code) ?? v.message}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {cycleResult.execution && (
                       <div className="rounded-lg bg-zinc-50 dark:bg-zinc-900 p-3 font-mono text-[11px] space-y-1">
                         <p>status: {cycleResult.execution.status} · delivered: {String(cycleResult.execution.delivered)}{cycleResult.execution.dry_run ? " · DRY_RUN" : ""}</p>

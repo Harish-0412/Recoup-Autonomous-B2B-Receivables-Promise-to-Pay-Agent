@@ -11,7 +11,7 @@ import { fetchInvoiceList, type InvoiceListFilters } from "@/lib/api";
 import { ChevronLeft, ChevronRight, ListOrdered, Info, ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export default function QueuePage() {
+function QueuePageInner() {
   const shouldReduce = useReducedMotion();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -351,5 +351,13 @@ export default function QueuePage() {
         </motion.div>
       )}
     </main>
+  );
+}
+
+export default function QueuePage() {
+  return (
+    <React.Suspense fallback={<div className="p-8 text-center text-zinc-500 font-mono text-xs">Loading queue...</div>}>
+      <QueuePageInner />
+    </React.Suspense>
   );
 }

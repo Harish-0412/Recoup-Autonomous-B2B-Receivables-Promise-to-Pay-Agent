@@ -11,6 +11,8 @@ import {
   type PolicyCondition,
 } from "@/lib/api";
 import KpiCard from "@/components/KpiCard";
+import InfoCallout from "@/components/ui/InfoCallout";
+import { describePolicyCode } from "@/lib/policyLabels";
 import {
   ShieldCheck,
   ShieldAlert,
@@ -96,11 +98,48 @@ function describeCondition(c: PolicyCondition): string {
 }
 
 function ruleToSentence(rule: PolicyRule): {
+  code?: string;
+  description?: string;
   ifClause: string;
   thenActions: { kind: "block" | "clamp"; text: string }[];
 } {
-  const allConds = rule.conditions.all ?? [];
-  const anyConds = rule.conditions.any ?? [];
+  if (!rule) {
+    return { ifClause: "always", thenActions: [] };
+  }
+
+  // Handle format 1: Live backend PolicyEngine rules: { code, action, description }
+  if (rule.code || (rule.description && !rule.conditions)) {
+    const isClamp =
+      rule.action === "adjust" ||
+      rule.action === "clamp" ||
+      rule.code?.toLowerCase().includes("discount");
+
+    const codeLabel = rule.code
+      ? FIELD_LABELS[rule.code] || describePolicyCode(rule.code)
+      : "Rule";
+
+    const ifClause = rule.description || codeLabel;
+
+    const thenActions = [
+      {
+        kind: isClamp ? ("clamp" as const) : ("block" as const),
+        text: isClamp
+          ? `CLAMP / ADJUST — Enforces strict ceiling (${rule.code || "discount_ceiling"})`
+          : `BLOCK (${rule.code || "policy_guard"}) — Halts execution before outbound contact`,
+      },
+    ];
+
+    return {
+      code: rule.code,
+      description: rule.description,
+      ifClause,
+      thenActions,
+    };
+  }
+
+  // Handle format 2: Nested conditions/actions AST: { conditions: { all, any }, actions: [...] }
+  const allConds = rule.conditions?.all ?? [];
+  const anyConds = rule.conditions?.any ?? [];
 
   const parts: string[] = [];
   if (allConds.length) {
@@ -110,12 +149,13 @@ function ruleToSentence(rule: PolicyRule): {
     parts.push("(" + anyConds.map(describeCondition).join(" OR ") + ")");
   }
 
-  const ifClause = parts.length ? parts.join(" AND ") : "always";
+  const ifClause = parts.length ? parts.join(" AND ") : (rule.description || "always");
 
-  const thenActions = rule.actions.map((a) => {
+  const actionsList = Array.isArray(rule.actions) ? rule.actions : [];
+  const thenActions = actionsList.map((a) => {
     if (a.name === "block") {
-      const message = typeof a.params.message === "string" ? a.params.message : "";
-      const code = typeof a.params.code === "string" ? a.params.code : "unknown";
+      const message = typeof a.params?.message === "string" ? a.params.message : "";
+      const code = typeof a.params?.code === "string" ? a.params.code : "unknown";
       return {
         kind: "block" as const,
         text: message || `BLOCK (${code})`,
@@ -123,22 +163,36 @@ function ruleToSentence(rule: PolicyRule): {
     }
     if (a.name === "clamp_discount") {
       const ceil =
-        typeof a.params.ceiling === "number"
+        typeof a.params?.ceiling === "number"
           ? a.params.ceiling
-          : Number(a.params.ceiling) || 0;
-      const reason = typeof a.params.reason === "string" ? a.params.reason : "";
+          : Number(a.params?.ceiling) || 0;
+      const reason = typeof a.params?.reason === "string" ? a.params.reason : "";
       return {
         kind: "clamp" as const,
         text: `CLAMP discount to ceiling of ${ceil}% — ${reason}`,
       };
     }
+    // An action kind the frontend doesn't have a specific translation for yet —
+    // show its name plainly rather than dumping raw JSON at the reader.
+    const paramSummary = Object.entries(a.params || {})
+      .map(([k, v]) => `${k}=${v}`)
+      .join(", ");
     return {
       kind: "block" as const,
-      text: `${a.name.toUpperCase()}: ${JSON.stringify(a.params)}`,
+      text: paramSummary
+        ? `${(a.name || "action").replace(/_/g, " ")} (${paramSummary})`
+        : (a.name || "action").replace(/_/g, " "),
     };
   });
 
-  return { ifClause, thenActions };
+  if (thenActions.length === 0) {
+    thenActions.push({
+      kind: "block" as const,
+      text: "BLOCK outbound contact",
+    });
+  }
+
+  return { code: rule.code, description: rule.description, ifClause, thenActions };
 }
 
 function SkeletonCeiling() {
@@ -179,11 +233,16 @@ export default function PolicyPage() {
     isLoading,
     isFetching,
     refetch,
+    dataUpdatedAt,
   } = useQuery<PolicyResponse>({
     queryKey: ["policy"],
     queryFn: fetchPolicy,
     staleTime: 60_000,
   });
+
+  const lastSynced = dataUpdatedAt
+    ? new Date(dataUpdatedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
+    : null;
 
   const cfg = policy?.config;
   const enforcement = policy?.enforcement;
@@ -232,6 +291,11 @@ export default function PolicyPage() {
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-200/60 dark:border-emerald-500/20 tabular-nums">
                 <span className="w-2 h-2 rounded-full bg-emerald-500" />
                 {ruleCount} rules compiled · live from engine
+                {lastSynced && (
+                  <span className="text-emerald-600/70 dark:text-emerald-400/60 font-normal">
+                    {" "}· synced {lastSynced}
+                  </span>
+                )}
               </span>
             )}
           </div>
@@ -560,9 +624,19 @@ export default function PolicyPage() {
                           <span className="mt-0.5 inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold tracking-wider bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-200/60 dark:border-blue-500/20 font-mono uppercase shrink-0">
                             IF
                           </span>
-                          <code className="text-[13px] leading-relaxed text-zinc-800 dark:text-zinc-200 font-mono bg-zinc-50 dark:bg-white/5 border border-zinc-200/60 dark:border-white/10 rounded-md px-3 py-2 flex-1 whitespace-pre-wrap break-words">
-                            {r.ifClause}
-                          </code>
+                          <div className="flex-1 min-w-0 space-y-1">
+                            <code className="block text-[13px] leading-relaxed text-zinc-800 dark:text-zinc-200 font-mono bg-zinc-50 dark:bg-white/5 border border-zinc-200/60 dark:border-white/10 rounded-md px-3 py-2 whitespace-pre-wrap break-words">
+                              {r.ifClause}
+                            </code>
+                            {r.code && (
+                              <span
+                                className="inline-block text-[10px] font-mono text-zinc-400 dark:text-zinc-500"
+                                title="Raw rule code — matches the code recorded on Decision Trace entries and policy_block_reasons"
+                              >
+                                code: {r.code}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </td>
                       <td className="px-5 py-4 align-top">
@@ -765,6 +839,22 @@ export default function PolicyPage() {
             </div>
           </div>
         </motion.div>
+      )}
+
+      {!isLoading && (
+        <InfoCallout
+          tone="info"
+          title="Where to see this gate actually fire:"
+          links={[
+            { label: "Batch evaluation report", href: "/reports/batch" },
+            { label: "A sample invoice's decision trace", href: "/queue" },
+          ]}
+        >
+          Every block, clamp, and approval above writes a Decision Trace entry.
+          The batch report totals those entries across the whole book (blocked-by-policy
+          counts, reasons); an individual invoice&apos;s audit trail shows the entries
+          one at a time, in order, hash-chained.
+        </InfoCallout>
       )}
     </main>
   );

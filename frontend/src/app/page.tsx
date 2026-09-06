@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/ThemeWrapper";
 import { Preloader } from "@/components/ui/preloader";
 import { FluidMorphBg } from "@/components/ui/fluid-morph-bg";
 import { AnimatedFooter } from "@/components/ui/animated-footer";
@@ -52,7 +52,7 @@ function formatINR(amount: number): string {
 }
 
 export default function Home() {
-  const [showPreloader, setShowPreloader] = useState(false);
+  const [showPreloader, setShowPreloader] = useState(true);
   const [activeTab, setActiveTab] = useState<"cfo" | "founder" | "ar">("cfo");
   const [mounted, setMounted] = useState(false);
   const { resolvedTheme, setTheme } = useTheme();
@@ -74,7 +74,7 @@ export default function Home() {
     setMounted(true);
   }, []);
 
-  const isDark = mounted ? resolvedTheme === "dark" : true;
+  const isDark = mounted ? resolvedTheme === "dark" : false;
 
   // Single Floating Dock placed at the bottom of the screen
   const dockItems: DockItem[] = [
@@ -241,9 +241,11 @@ export default function Home() {
 
   return (
     <>
-      {showPreloader && (
-        <Preloader onComplete={() => setShowPreloader(false)} />
-      )}
+      <AnimatePresence mode="wait">
+        {showPreloader && (
+          <Preloader onComplete={() => setShowPreloader(false)} />
+        )}
+      </AnimatePresence>
 
       <main className="min-h-screen bg-white text-zinc-900 dark:bg-black dark:text-white selection:bg-orange-500/30 transition-colors duration-300 font-sans relative pb-28">
         

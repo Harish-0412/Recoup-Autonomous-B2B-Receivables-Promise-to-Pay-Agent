@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useOutsideClick } from "@/hooks/use-outside-click";
+import InfoTooltip from "@/components/ui/InfoTooltip";
 
 const INTENT_LABEL_STYLES: Record<string, { label: string; className: string }> = {
   PROMISE_TO_PAY: {
@@ -351,8 +352,9 @@ function DetailDrawer({
   }, [onClose]);
 
   return (
-    <AnimatePresence>
+    <>
       <motion.div
+        key="drawer-backdrop"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
@@ -361,6 +363,7 @@ function DetailDrawer({
         onClick={onClose}
       />
       <motion.aside
+        key="drawer-aside"
         ref={ref}
         initial={{ x: "100%" }}
         animate={{ x: 0 }}
@@ -436,6 +439,11 @@ function DetailDrawer({
               <p className="text-[10px] font-mono text-zinc-500 dark:text-zinc-400 inline-flex items-center gap-1.5">
                 <BrainCircuit className="w-3 h-3" />
                 classifier: {item.classifier_version}
+                <InfoTooltip>
+                  Which model version produced the intent label and confidence above — a TF-IDF/SVM
+                  cascade over an LLM baseline. Logged so a verdict can always be traced back to the
+                  model that made it. See /models for validation numbers.
+                </InfoTooltip>
               </p>
             )}
           </div>
@@ -451,6 +459,11 @@ function DetailDrawer({
               </p>
               <span className="text-[10px] font-medium text-zinc-400">heuristic · verify before acting</span>
             </div>
+            <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mb-3">
+              Parsed in your browser from the reply text below, for your reading only — never
+              sent to any endpoint or used to trigger an action. If a promise needs recording,
+              do it from the case file&apos;s promise history, not from these chips.
+            </p>
             <div className="flex flex-wrap gap-2">
               {entities.amount != null && (
                 <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-200/60 dark:border-emerald-500/20 text-xs font-bold">
@@ -505,9 +518,15 @@ function DetailDrawer({
         <div className="flex-shrink-0 border-t border-zinc-200 dark:border-white/10 bg-white dark:bg-neutral-950 px-6 py-4">
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
             <div className="flex-1 text-xs text-zinc-500 dark:text-zinc-400">
-              <p className="inline-flex items-center gap-1.5">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-                Clicking <span className="font-bold text-zinc-700 dark:text-zinc-200">Mark Reviewed</span> records your sign-off and removes this row from the queue.
+              <p className="inline-flex items-start gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 mt-0.5 flex-shrink-0" />
+                <span>
+                  Clicking <span className="font-bold text-zinc-700 dark:text-zinc-200">Mark Reviewed</span> sets
+                  this reply&apos;s disposition to <code className="px-1 py-0.5 rounded bg-zinc-100 dark:bg-white/10 text-[11px] font-mono">REVIEWED</code> and
+                  stamps a <code className="px-1 py-0.5 rounded bg-zinc-100 dark:bg-white/10 text-[11px] font-mono">reviewed_at</code> timestamp — that&apos;s the entire
+                  effect. It does not send a reply, change the invoice&apos;s escalation state, or act on
+                  anything extracted below; it is a human sign-off, nothing more.
+                </span>
               </p>
             </div>
             <div className="flex items-center gap-2.5 justify-end">
@@ -543,7 +562,7 @@ function DetailDrawer({
           </div>
         </div>
       </motion.aside>
-    </AnimatePresence>
+    </>
   );
 }
 
@@ -650,6 +669,7 @@ export default function InboxPage() {
   const shouldReduce = useReducedMotion();
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [markError, setMarkError] = useState<string | null>(null);
 
   const {
     data: queue,
@@ -671,6 +691,7 @@ export default function InboxPage() {
   const markMutation = useMutation({
     mutationFn: (replyId: string) => markReplyReviewed(replyId),
     onMutate: async (replyId) => {
+      setMarkError(null);
       await queryClient.cancelQueries({ queryKey: ["reply-review-queue"] });
       const prev = queryClient.getQueryData<ReplyReviewQueue>(["reply-review-queue"]);
       if (prev) {
@@ -682,10 +703,23 @@ export default function InboxPage() {
       if (selectedId === replyId) setSelectedId(null);
       return { prev };
     },
-    onError: (_err, _replyId, ctx) => {
+    onSuccess: (result, replyId, ctx) => {
+      // markReplyReviewed never throws on a network/HTTP failure — it resolves
+      // { ok: false } instead, so a failed call would otherwise look identical
+      // to a successful one. Check it explicitly and roll back the optimistic
+      // removal so a silent failure can't leave the queue looking clear.
+      if (!result.ok) {
+        if (ctx?.prev) {
+          queryClient.setQueryData<ReplyReviewQueue>(["reply-review-queue"], ctx.prev);
+        }
+        setMarkError(`Could not mark ${replyId} reviewed — it's still in the queue. Try again.`);
+      }
+    },
+    onError: (_err, replyId, ctx) => {
       if (ctx?.prev) {
         queryClient.setQueryData<ReplyReviewQueue>(["reply-review-queue"], ctx.prev);
       }
+      setMarkError(`Could not mark ${replyId} reviewed — it's still in the queue. Try again.`);
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["task-status"] });
@@ -723,7 +757,25 @@ export default function InboxPage() {
   );
 
   return (
-    <main className="p-4 sm:p-6 lg:p-8 max-w-[1200px] mx-auto space-y-6 lg:space-y-8 min-h-full">
+    <main className="p-4 sm:p-6 lg:p-8 max-w-[1400px] mx-auto space-y-6 lg:space-y-8 min-h-full">
+      <AnimatePresence>
+        {markError && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            className="rounded-xl px-4 py-3 bg-red-50 dark:bg-red-500/10 border border-red-200/60 dark:border-red-500/25 flex items-start justify-between gap-3"
+          >
+            <p className="text-xs sm:text-sm text-red-800 dark:text-red-200">{markError}</p>
+            <button
+              onClick={() => setMarkError(null)}
+              className="text-red-500 hover:text-red-700 dark:hover:text-red-300 flex-shrink-0"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {/* Header */}
       <motion.div
         initial={{ opacity: 0, y: -8 }}
@@ -837,6 +889,7 @@ export default function InboxPage() {
       <AnimatePresence>
         {selectedItem && (
           <DetailDrawer
+            key={selectedItem.reply_id}
             item={selectedItem}
             onClose={() => setSelectedId(null)}
             onMarkReviewed={handleMarkReviewed}

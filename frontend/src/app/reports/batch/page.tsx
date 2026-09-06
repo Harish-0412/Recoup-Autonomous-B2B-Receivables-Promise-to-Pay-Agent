@@ -37,6 +37,8 @@ import {
 } from "recharts";
 import { fetchBatchReport, type BatchReportResponse, type TopCaseItem } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import InfoTooltip from "@/components/ui/InfoTooltip";
+import { describePolicyCode } from "@/lib/policyLabels";
 
 // ---------------------------------------------------------------------------
 // Formatting helpers (same conventions as /dashboard and /queue)
@@ -162,11 +164,22 @@ function loadHistory(): HistoryPoint[] {
 // Small building blocks
 // ---------------------------------------------------------------------------
 
-function StatCell({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function StatCell({
+  label,
+  value,
+  sub,
+  tooltip,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  tooltip?: React.ReactNode;
+}) {
   return (
     <div className="rounded-xl px-4 py-3.5 bg-zinc-50/80 dark:bg-white/[0.03] border border-zinc-200/60 dark:border-white/[0.06]">
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+      <div className="flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
         {label}
+        {tooltip && <InfoTooltip>{tooltip}</InfoTooltip>}
       </div>
       <div className="text-xl font-bold tracking-tight text-zinc-900 dark:text-white tabular-nums mt-0.5">
         {value}
@@ -416,6 +429,7 @@ export default function BatchReportPage() {
             <StatCell
               label="Decision cycles run"
               value={formatInt(report.cycles_run)}
+              tooltip="One invoice can run the score → propose → gate → execute cycle more than once (e.g. a reminder, then later an escalation), so this can exceed invoices processed above."
               sub={`${formatInt(report.ledger_entries)} trace entries`}
             />
           </CategorySection>
@@ -460,12 +474,13 @@ export default function BatchReportPage() {
             <StatCell
               label="Blocked by policy"
               value={formatInt(report.blocked_by_policy)}
+              tooltip="An action the scorer proposed, refused before any outbound contact happened. The policy gate can only block or clamp — it never approves or escalates on its own."
               sub={
                 Object.keys(report.policy_block_reasons ?? {}).length > 0
                   ? Object.entries(report.policy_block_reasons)
                       .sort((a, b) => b[1] - a[1])
                       .slice(0, 2)
-                      .map(([k, v]) => `${k}: ${v}`)
+                      .map(([k, v]) => `${describePolicyCode(k)}: ${v}`)
                       .join(" · ")
                   : "no blocks recorded"
               }
@@ -473,6 +488,7 @@ export default function BatchReportPage() {
             <StatCell
               label="Tier mix"
               value={Object.values(report.tier_counts ?? {}).length > 0 ? formatInt(Object.values(report.tier_counts).reduce((a, b) => a + b, 0)) : "—"}
+              tooltip="WAIT: below the self-cure/EV threshold to act. REMIND: a reminder is worth sending. ESCALATE: highest urgency — next rung on the escalation ladder. See /policy for the exact ceilings."
               sub={
                 Object.entries(report.tier_counts ?? {})
                   .map(([k, v]) => `${k} ${v}`)
@@ -485,7 +501,7 @@ export default function BatchReportPage() {
               sub={
                 Object.entries(report.policy_block_reasons ?? {})
                   .sort((a, b) => b[1] - a[1])
-                  .map(([k, v]) => `${k} ×${v}`)
+                  .map(([k, v]) => `${describePolicyCode(k)} ×${v}`)
                   .join(", ") || "—"
               }
             />
@@ -706,8 +722,26 @@ export default function BatchReportPage() {
                       <tr className="bg-zinc-50/60 dark:bg-white/[0.02] border-b border-zinc-200 dark:border-white/10 text-zinc-500 dark:text-zinc-400">
                         <th className="px-5 py-3.5 text-[11px] font-semibold uppercase tracking-wider w-14">#</th>
                         <th className="px-5 py-3.5 text-[11px] font-semibold uppercase tracking-wider">Invoice</th>
-                        <th className="px-5 py-3.5 text-[11px] font-semibold uppercase tracking-wider">Outstanding / EV</th>
-                        <th className="px-5 py-3.5 text-[11px] font-semibold uppercase tracking-wider">P(Recovery)</th>
+                        <th className="px-5 py-3.5 text-[11px] font-semibold uppercase tracking-wider">
+                          <span className="inline-flex items-center gap-1">
+                            Outstanding / EV
+                            <InfoTooltip>
+                              EV = P(recovery) × outstanding × urgency weight − intervention cost.
+                              The mirror of expected-loss underwriting, run to estimate expected
+                              recovery instead. The queue and this leaderboard both rank on it.
+                            </InfoTooltip>
+                          </span>
+                        </th>
+                        <th className="px-5 py-3.5 text-[11px] font-semibold uppercase tracking-wider">
+                          <span className="inline-flex items-center gap-1">
+                            P(Recovery)
+                            <InfoTooltip>
+                              Output of the rules-based recovery scorer (not a trained/calibrated
+                              model — see /models for validation numbers). It answers &quot;will this
+                              invoice pay within 30 days&quot;, independent of any action taken.
+                            </InfoTooltip>
+                          </span>
+                        </th>
                         <th className="px-5 py-3.5 text-[11px] font-semibold uppercase tracking-wider">Tier</th>
                         <th className="px-5 py-3.5 text-[11px] font-semibold uppercase tracking-wider">Policy</th>
                         <th className="px-5 py-3.5 text-[11px] font-semibold uppercase tracking-wider">Rationale</th>

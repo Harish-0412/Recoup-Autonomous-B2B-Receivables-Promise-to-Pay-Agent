@@ -47,6 +47,9 @@ import {
   type TaskStatusResponse,
 } from "@/lib/api";
 import { MLWorkflowTrace } from "@/components/ml/MLWorkflowTrace";
+import InfoTooltip from "@/components/ui/InfoTooltip";
+import InfoCallout from "@/components/ui/InfoCallout";
+import { describePolicyCode } from "@/lib/policyLabels";
 import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -708,6 +711,21 @@ export default function RunsPage() {
           </div>
         </motion.div>
 
+        <InfoCallout
+          tone="info"
+          title="What's actually deciding these outcomes:"
+          links={[
+            { label: "Compiled policy rulebook", href: "/policy" },
+            { label: "Model validation numbers", href: "/models" },
+          ]}
+        >
+          The <strong>gate</strong> stage below is the compiled policy engine — the same ceilings
+          and rules shown on the Policy page. The <strong>score</strong>/<strong>propose</strong>{" "}
+          stages call the recovery scorer and the contact-timing bandit (a 15-arm model picking
+          the weekday/daypart most likely to get a reply) — their validation numbers live on the
+          Models page.
+        </InfoCallout>
+
         {/* Task-key gate */}
         <section className="rounded-2xl bg-white dark:bg-neutral-900 border border-zinc-200 dark:border-white/10 shadow-sm p-5 sm:p-6">
           <div className="flex flex-col lg:flex-row lg:items-center gap-4">
@@ -1259,15 +1277,20 @@ export default function RunsPage() {
                                   </div>
                                   <div>
                                     <span className="text-zinc-400 mr-1.5">Expected Recovery:</span>
-                                    <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400" title="Probability × Outstanding">
+                                    <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">
                                       {formatCurrency(dec.expected_recovery ?? (dec.p_recovery * dec.outstanding))}
                                     </span>
+                                    <InfoTooltip>P(recovery) × outstanding — the raw rupee expectation before costs.</InfoTooltip>
                                   </div>
                                   <div>
                                     <span className="text-zinc-400 mr-1.5">Net VaR (EV Score):</span>
-                                    <span className="font-mono font-semibold text-orange-600 dark:text-orange-400" title="(1 - P) × outstanding × urgency - intervention_cost">
+                                    <span className="font-mono font-semibold text-orange-600 dark:text-orange-400">
                                       {formatCurrency(dec.expected_value)}
                                     </span>
+                                    <InfoTooltip>
+                                      EV = P(recovery) × outstanding × urgency weight − intervention cost.
+                                      This is the number the queue and this run are ranked/acted on.
+                                    </InfoTooltip>
                                   </div>
                                   {dec.action_type && (
                                     <div>
@@ -1398,6 +1421,14 @@ export default function RunsPage() {
                                               {dec.timing_fallback && " (heuristic)"}
                                             </span>
                                           )}
+                                          {dec.timing_arm && (
+                                            <InfoTooltip>
+                                              A contextual bandit picks the weekday/daypart &quot;arm&quot;
+                                              (15 total) most likely to get a reply, learning from past
+                                              send outcomes rather than a fixed cadence. See /models for
+                                              its offline lift numbers.
+                                            </InfoTooltip>
+                                          )}
                                           {dec.drift_flagged != null && (
                                             <span
                                               className={cn(
@@ -1441,7 +1472,7 @@ export default function RunsPage() {
                                               key={idx}
                                               className="px-2.5 py-1 rounded-md bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 text-rose-800 dark:text-rose-300 font-mono text-[11px]"
                                             >
-                                              <span className="font-bold mr-1.5">[{v.code}]:</span>
+                                              <span className="font-bold mr-1.5">{describePolicyCode(v.code)}:</span>
                                               {v.message}
                                             </li>
                                           ))}

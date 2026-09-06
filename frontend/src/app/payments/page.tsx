@@ -49,6 +49,9 @@ import {
   type InvoiceOut,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import InfoCallout from "@/components/ui/InfoCallout";
+import InfoTooltip from "@/components/ui/InfoTooltip";
+import Link from "next/link";
 
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
@@ -81,6 +84,7 @@ function PaymentsContent() {
   const [allocatingItem, setAllocatingItem] = useState<UnmatchedPaymentOut | null>(null);
   const [targetInvoiceId, setTargetInvoiceId] = useState<string>(initialInvoiceId);
   const [allocationSuccess, setAllocationSuccess] = useState<string | null>(null);
+  const [allocationSuccessInvoiceId, setAllocationSuccessInvoiceId] = useState<string | null>(null);
   const [allocationError, setAllocationError] = useState<string | null>(null);
 
   // --- ERP State ---
@@ -167,6 +171,7 @@ function PaymentsContent() {
       confirmAllocation(allocId, invId),
     onSuccess: (data) => {
       setAllocationSuccess(`Payment successfully allocated to ${data.invoice_id}! Amount paid: ₹${data.new_amount_paid.toLocaleString("en-IN")}, Status: ${data.invoice_status}`);
+      setAllocationSuccessInvoiceId(data.invoice_id);
       setAllocationError(null);
       setAllocatingItem(null);
       queryClient.invalidateQueries({ queryKey: ["unmatched-payments"] });
@@ -226,20 +231,21 @@ function PaymentsContent() {
     <div className="min-h-screen bg-zinc-50 dark:bg-black text-zinc-900 dark:text-zinc-100 pb-16">
       {/* Top Banner */}
       <div className="border-b border-zinc-200/80 dark:border-white/10 bg-white dark:bg-zinc-900/60 backdrop-blur-md">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, ease: "easeOut" }}
+          className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4"
+        >
           <div>
-            <div className="flex items-center gap-2.5 mb-1.5">
-              <div className="h-6 w-6 rounded-md bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-white text-xs font-bold shadow-sm">
-                ₹
-              </div>
-              <span className="text-xs font-mono font-semibold tracking-wider text-emerald-600 dark:text-emerald-400 uppercase">
-                Wave 2 • Money Truth
-              </span>
+            <div className="flex items-center gap-2 text-xs font-mono text-emerald-600 dark:text-emerald-400 font-bold tracking-[0.12em] uppercase mb-1.5">
+              <DollarSign className="w-3.5 h-3.5" />
+              <span>Money Truth & Reconciliation</span>
             </div>
-            <h1 className="text-2xl font-bold tracking-tight text-zinc-950 dark:text-white">
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-900 dark:text-white leading-tight">
               Payments, Allocations & ERP Sync
             </h1>
-            <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 mt-1 max-w-2xl">
+            <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1.5 max-w-2xl leading-relaxed">
               Canonical money ledger, real-time UTR / bank transfer matching with operator confirmation, and automated two-way sync with Zoho Books, QuickBooks, Razorpay, and TallyPrime.
             </p>
           </div>
@@ -248,16 +254,17 @@ function PaymentsContent() {
             <button
               onClick={() => syncErpMutation.mutate()}
               disabled={syncErpMutation.isPending}
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition-all disabled:opacity-50 cursor-pointer"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold bg-gradient-to-br from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white shadow-md hover:shadow-lg shadow-emerald-500/15 transition-all active:scale-[0.97] disabled:opacity-70 disabled:active:scale-100"
+              title="Pulls each connected provider's ledger (Zoho, QuickBooks, Tally, Razorpay) and reconciles it against Recoup's own payment records — see the ERP tab for what a sync does per-provider."
             >
-              <RefreshCw className={cn("w-3.5 h-3.5", syncErpMutation.isPending && "animate-spin")} />
+              <RefreshCw className={cn("w-4 h-4", syncErpMutation.isPending && "animate-spin")} />
               {syncErpMutation.isPending ? "Syncing ERPs..." : "Sync All ERPs"}
             </button>
           </div>
-        </div>
+        </motion.div>
 
         {/* Global Nav Tabs */}
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex gap-2 border-t border-zinc-100 dark:border-white/5 pt-2">
+        <div className="max-w-[1400px] mx-auto px-4 sm:px-6 flex gap-2 border-t border-zinc-100 dark:border-white/5 pt-2">
           <button
             onClick={() => setActiveTab("utr")}
             className={cn(
@@ -305,16 +312,33 @@ function PaymentsContent() {
       </div>
 
       {/* Main Content Area */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+      <div className="max-w-[1400px] mx-auto px-4 sm:px-6 py-8">
         {/* TAB 1: UTR & Bank Transfers */}
         {activeTab === "utr" && (
           <div className="space-y-8">
+            <InfoCallout tone="info" title="How the matcher decides:">
+              It tries, in order: an exact match on the invoice ID you suggest, then amount ±₹1
+              (TDS rounding) within a ±2-day window of the due date or an open promise date,
+              narrowed by the payer-account hint if one resolves to a known customer.{" "}
+              <strong>certain/probable</strong> means exactly one open invoice fit;{" "}
+              <strong>ambiguous</strong> means two or more invoices share that amount — the
+              matcher refuses to guess and queues it below for you to confirm by hand.
+            </InfoCallout>
+
             {/* Action Feedback Banner */}
             {allocationSuccess && (
               <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-800 dark:text-emerald-300 text-xs flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
                   <span>{allocationSuccess}</span>
+                  {allocationSuccessInvoiceId && (
+                    <Link
+                      href={`/invoices/${encodeURIComponent(allocationSuccessInvoiceId)}`}
+                      className="font-semibold underline underline-offset-2 hover:text-emerald-900 dark:hover:text-emerald-100 inline-flex items-center gap-0.5"
+                    >
+                      Open case file <ArrowRight className="w-3 h-3" />
+                    </Link>
+                  )}
                 </div>
                 <button onClick={() => setAllocationSuccess(null)} className="text-emerald-600 hover:text-emerald-800 dark:hover:text-white">
                   <X className="w-4 h-4" />
@@ -451,7 +475,15 @@ function PaymentsContent() {
                 {lastMatchResult && (
                   <div className="mt-4 p-4 rounded-xl border border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-zinc-800/40 text-xs space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="font-semibold text-zinc-900 dark:text-white">Matcher Verdict</span>
+                      <span className="font-semibold text-zinc-900 dark:text-white inline-flex items-center gap-1">
+                        Matcher Verdict
+                        <InfoTooltip>
+                          duplicate = this UTR is already recorded. probable = exactly one open
+                          invoice fit the suggested ID or the amount/date/customer heuristic.
+                          ambiguous = two or more invoices share the amount — needs your confirmation.
+                          no_match = nothing fit; queued below for manual allocation.
+                        </InfoTooltip>
+                      </span>
                       <span
                         className={cn(
                           "px-2 py-0.5 rounded-full text-[10px] font-mono uppercase font-bold",
@@ -575,6 +607,20 @@ function PaymentsContent() {
         {/* TAB 2: ERP Integrations */}
         {activeTab === "erp" && (
           <div className="space-y-8">
+            <InfoCallout
+              tone="info"
+              title="What Connect and Sync actually do:"
+              links={[{ label: "Where scheduled syncs run", href: "/runs" }]}
+            >
+              <strong>Connect</strong> exchanges the authorization code you paste for that
+              provider&apos;s access/refresh tokens server-side — the tokens are stored there, never
+              returned to or held by this browser. <strong>Sync</strong> pulls each open invoice from
+              the provider and reconciles it: new invoices are created, existing ones have amount and
+              due date updated, but Recoup&apos;s own collection state (escalation step, promises,
+              contact history) is never overwritten by the ERP — the ERP is the source of truth for
+              billing, Recoup is the source of truth for collections.
+            </InfoCallout>
+
             {/* Sync Result Notification */}
             {syncResult && (
               <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-900 dark:text-emerald-200 flex items-center justify-between">
@@ -826,7 +872,23 @@ function PaymentsContent() {
         {activeTab === "ledger" && (
           <div className="space-y-8">
             {/* Architectural Invariants Card */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              <div className="p-5 rounded-xl bg-white dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-white/10 space-y-2">
+                <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 font-bold text-xs">
+                  <ShieldCheck className="w-4 h-4" />
+                  Signature Verified First
+                </div>
+                <h4 className="text-sm font-semibold text-zinc-900 dark:text-white">
+                  HMAC(X-Razorpay-Signature) before anything else
+                </h4>
+                <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                  The webhook receiver verifies the payload&apos;s signature against
+                  <code className="font-mono bg-zinc-100 dark:bg-zinc-800 px-1 py-0.5 rounded ml-1">RAZORPAY_WEBHOOK_SECRET</code> before
+                  parsing or trusting anything in it. An unverified or forged payload is rejected —
+                  it never reaches allocation logic.
+                </p>
+              </div>
+
               <div className="p-5 rounded-xl bg-white dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-white/10 space-y-2">
                 <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-bold text-xs">
                   <Database className="w-4 h-4" />
